@@ -70,6 +70,20 @@ Activate the python script
   python3 src/main.py
 ```
 
+**Viewing the stream from another device**
+
+Add `--stream` (on by default in `start.sh`) to serve the annotated feed (pose skeleton, body centre, head point, FPS, pan/tilt) over HTTP:
+```bash
+  python3 src/main.py --headless --stream            # on the Pi
+  python src/main.py --mock --headless --stream      # on a laptop with simulated servos
+```
+Then, from any device on the same network, open `http://[pi ip]:8080/`.
+- `/stream` – raw MJPEG (works in a browser, `<img src>`, or VLC "Open Network Stream")
+- `/snapshot.jpg` – the latest single frame
+- `/pose` – latest keypoints / body position / servo angles as JSON
+- Options: `--stream-port`, `--stream-host`, `--stream-quality` (JPEG, default 70), `--stream-scale` (lower this on a Pi 3 to save CPU/bandwidth)
+- Frames are only encoded while someone is watching. There is no authentication, so only use it on a trusted network. On Windows, allow Python through the firewall for the port.
+
 
 
 

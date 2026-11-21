@@ -1,4 +1,3 @@
-#taken straight from the repo
 
 from openvino import Core
 import numpy as np
@@ -97,6 +96,15 @@ class PoseDetector:
     """
     # COCO keypoint indexes 0-4: nose, left eye, right eye, left ear, right ear
     HEAD_KPTS = [0, 1, 2, 3, 4]
+    # shoulders + hips: the most stable points for the body's centre of mass
+    TORSO_KPTS = [5, 6, 11, 12]
+    # COCO-17 keypoint names, in model output order
+    KEYPOINT_NAMES = [
+        "nose", "left_eye", "right_eye", "left_ear", "right_ear",
+        "left_shoulder", "right_shoulder", "left_elbow", "right_elbow",
+        "left_wrist", "right_wrist", "left_hip", "right_hip",
+        "left_knee", "right_knee", "left_ankle", "right_ankle",
+    ]
 
     def __init__(self,
                  model,
@@ -173,3 +181,69 @@ class PoseDetector:
         if len(visible) == 0:
             return None
         return int(visible[:, 0].mean()), int(visible[:, 1].mean())
+
+    @staticmethod
+    def keypoint_positions(kpts, kpt_thr=0.5):
+        """
+        Position of every body vertex (keypoint) for one person.
+        :param kpts: (17, 3) array of (x, y, conf) in frame pixels
+        :return: {name: {"x", "y", "conf", "visible"}} for all 17 COCO keypoints.
+                 Low-confidence points are kept but flagged visible=False.
+        """
+        return {
+            name: {
+                "x": int(x),
+                "y": int(y),
+                "conf": float(conf),
+                "visible": bool(conf > kpt_thr),
+            }
+            for name, (x, y, conf) in zip(PoseDetector.KEYPOINT_NAMES, kpts)
+        }
+
+    @staticmethod
+    def body_position(kpts, box=None, kpt_thr=0.5, image_shape=None):
+        """
+        General position of one person's body.
+        Centre is the mean of the visible torso keypoints (shoulders/hips),
+        falling back to all visible keypoints, then to the box centre.
+        :param kpts: (17, 3) array of (x, y, conf) in frame pixels
+        :param box: optional (x1, y1, x2, y2) person box
+        :param image_shape: optional (h, w); if given, also returns the centre
+                            normalised to [-1, 1] relative to the frame middle
+        :return: dict with center, source, bbox, width, height, normalized;
+                 or None if nothing is visible and no box was given
+        """
+        visible = kpts[kpts[:, 2] > kpt_thr]
+        torso = kpts[PoseDetector.TORSO_KPTS]
+        torso = torso[torso[:, 2] > kpt_thr]
+
+        if len(torso):
+            center, source = torso[:, :2].mean(axis=0), "torso"
+        elif len(visible):
+            center, source = visible[:, :2].mean(axis=0), "keypoints"
+        elif box is not None:
+            x1, y1, x2, y2 = box
+            center, source = ((x1 + x2) / 2, (y1 + y2) / 2), "box"
+        else:
+            return None
+        cx, cy = int(center[0]), int(center[1])
+
+        if box is not None:
+            x1, y1, x2, y2 = (int(v) for v in box)
+        else:  # no box: use the extent of the visible keypoints
+            x1, y1 = visible[:, :2].min(axis=0).astype(int)
+            x2, y2 = visible[:, :2].max(axis=0).astype(int)
+
+        normalized = None
+        if image_shape is not None:
+            h, w = image_shape[:2]
+            normalized = (round((cx - w / 2) / (w / 2), 3), round((cy - h / 2) / (h / 2), 3))
+
+        return {
+            "center": (cx, cy),
+            "source": source,
+            "bbox": (int(x1), int(y1), int(x2), int(y2)),
+            "width": int(x2 - x1),
+            "height": int(y2 - y1),
+            "normalized": normalized,
+        }

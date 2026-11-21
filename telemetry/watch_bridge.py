@@ -7,6 +7,10 @@ import time
 from bleak import BleakClient, BleakScanner
 from bleak.exc import BleakError
 import paho.mqtt.client as mqtt
+from pathlib import Path
+from dotenv import load_dotenv
+
+load_dotenv(Path(__file__).resolve().parent / ".env")
 
 # Standard BLE Heart Rate Measurement & InfiniTime Motion Service UUIDs
 HR_CHAR_UUID = "00002a37-0000-1000-8000-00805f9b34fb"

@@ -1,4 +1,5 @@
 bleak>=0.22.0
 paho-mqtt>=2.1.0
-python-dotenv>=1.0.0psycopg[binary]
+python-dotenv>=1.0.0
+psycopg[binary]
 google-genai

@@ -1,0 +1,418 @@
+import json
+import os
+import sqlite3
+import threading
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+import paho.mqtt.client as mqtt
+import psycopg
+from dotenv import load_dotenv
+
+# Load environment variables from telemetry/.env
+ENV_PATH = Path(__file__).resolve().parent / ".env"
+load_dotenv(dotenv_path=ENV_PATH)
+
+TIGER_DATA_URL = os.getenv("TIGER_DATA_URL")
+MQTT_BROKER_IP = os.getenv("MQTT_BROKER_IP", "127.0.0.1")
+MQTT_BROKER_PORT = int(os.getenv("MQTT_BROKER_PORT", "1883"))
+SQLITE_DB_PATH = Path(__file__).resolve().parent / "climb_data.db"
+
+FLUSH_INTERVAL_SEC = 1.0
+MAX_BATCH_SIZE = 20
+
+
+class TelemetryDatabase:
+    def __init__(self, pg_url: str | None, sqlite_path: Path) -> None:
+        self.pg_url = pg_url
+        self.sqlite_path = sqlite_path
+        self.pg_conn: psycopg.Connection | None = None
+        self.lock = threading.Lock()
+
+        self.active_session_id: int | None = None
+        self.buffer: list[tuple[Any, ...]] = []
+
+        self._init_sqlite()
+        self._connect_pg()
+        if self.pg_conn:
+            self._init_timescale_schema()
+
+    def _connect_pg(self) -> bool:
+        if not self.pg_url:
+            print("[DB] TIGER_DATA_URL not set. Running in SQLite fallback mode.")
+            return False
+        try:
+            # autocommit=True is required for TimescaleDB continuous aggregate DDL
+            self.pg_conn = psycopg.connect(
+                self.pg_url,
+                autocommit=True,
+                connect_timeout=5,
+            )
+            print("[DB] Connected to Tiger Data Cloud (TimescaleDB).")
+            return True
+        except Exception as exc:
+            print(f"[DB] Tiger Data connection failed: {exc}. Falling back to SQLite.")
+            self.pg_conn = None
+            return False
+
+    def _init_sqlite(self) -> None:
+        with sqlite3.connect(self.sqlite_path) as conn:
+            conn.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS sessions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    started_at TEXT,
+                    ended_at TEXT,
+                    status TEXT
+                );
+
+                CREATE TABLE IF NOT EXISTS telemetry_points (
+                    time TEXT NOT NULL,
+                    session_id INTEGER,
+                    source TEXT,
+                    bpm INTEGER,
+                    accel_g REAL,
+                    xyz TEXT,
+                    speed REAL,
+                    fall_detected INTEGER
+                );
+
+                CREATE TABLE IF NOT EXISTS risk_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id INTEGER,
+                    created_at TEXT,
+                    risk_level TEXT,
+                    signal_type TEXT,
+                    summary TEXT
+                );
+                """
+            )
+        print(f"[DB] Local SQLite fallback ready at {self.sqlite_path}")
+
+    def _init_timescale_schema(self) -> None:
+        assert self.pg_conn is not None
+        try:
+            with self.pg_conn.cursor() as cur:
+                cur.execute("CREATE EXTENSION IF NOT EXISTS timescaledb;")
+
+                # 1. Sessions table
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS sessions (
+                        id SERIAL PRIMARY KEY,
+                        started_at TIMESTAMPTZ,
+                        ended_at TIMESTAMPTZ,
+                        status TEXT
+                    );
+                    """
+                )
+
+                # 2. Telemetry hypertable
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS telemetry_points (
+                        time TIMESTAMPTZ NOT NULL,
+                        session_id INT,
+                        source TEXT,
+                        bpm INT,
+                        accel_g FLOAT,
+                        xyz JSONB,
+                        speed FLOAT,
+                        fall_detected BOOLEAN
+                    );
+                    """
+                )
+                cur.execute(
+                    """
+                    SELECT create_hypertable(
+                        'telemetry_points',
+                        by_range('time'),
+                        if_not_exists => TRUE
+                    );
+                    """
+                )
+
+                # 3. Real-time Continuous Aggregate (1-minute buckets)
+                cur.execute(
+                    """
+                    CREATE MATERIALIZED VIEW IF NOT EXISTS session_telemetry_summary
+                    WITH (timescaledb.continuous) AS
+                    SELECT
+                        session_id,
+                        time_bucket('1 minute', time) AS bucket,
+                        AVG(bpm) AS avg_bpm,
+                        MAX(bpm) AS max_bpm,
+                        MAX(accel_g) AS max_accel_g,
+                        AVG(speed) AS avg_speed
+                    FROM telemetry_points
+                    WHERE session_id IS NOT NULL
+                    GROUP BY session_id, bucket
+                    WITH NO DATA;
+                    """
+                )
+                cur.execute(
+                    """
+                    ALTER MATERIALIZED VIEW session_telemetry_summary
+                    SET (timescaledb.materialized_only = false);
+                    """
+                )
+
+                # Refresh policy so historical buckets materialize automatically
+                cur.execute(
+                    """
+                    SELECT add_continuous_aggregate_policy(
+                        'session_telemetry_summary',
+                        start_offset => INTERVAL '1 hour',
+                        end_offset => INTERVAL '1 minute',
+                        schedule_interval => INTERVAL '1 minute',
+                        if_not_exists => TRUE
+                    );
+                    """
+                )
+
+                # 4. Risk events table for Gemini detector & React UI
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS risk_events (
+                        id SERIAL PRIMARY KEY,
+                        session_id INT,
+                        created_at TIMESTAMPTZ,
+                        risk_level TEXT,
+                        signal_type TEXT,
+                        summary TEXT
+                    );
+                    """
+                )
+
+            print("[DB] Tiger Data schema, hypertable, and continuous aggregate verified.")
+        except Exception as exc:
+            print(f"[DB] Schema initialization error: {exc}")
+
+    def start_session(self) -> int:
+        now = datetime.now(timezone.utc)
+        with self.lock:
+            # Close any dangling active session cleanly
+            if self.active_session_id is not None:
+                self._stop_session_unlocked(now)
+
+            session_id: int | None = None
+            if self.pg_conn or self._connect_pg():
+                try:
+                    assert self.pg_conn is not None
+                    with self.pg_conn.cursor() as cur:
+                        cur.execute(
+                            """
+                            INSERT INTO sessions (started_at, status)
+                            VALUES (%s, 'ACTIVE')
+                            RETURNING id;
+                            """,
+                            (now,),
+                        )
+                        row = cur.fetchone()
+                        if row:
+                            session_id = int(row[0])
+                except Exception as exc:
+                    print(f"[DB] Tiger Data start_session failed ({exc}), using SQLite.")
+                    self.pg_conn = None
+
+            if session_id is None:
+                with sqlite3.connect(self.sqlite_path) as conn:
+                    cur = conn.execute(
+                        "INSERT INTO sessions (started_at, status) VALUES (?, 'ACTIVE');",
+                        (now.isoformat(),),
+                    )
+                    session_id = int(cur.lastrowid)
+
+            self.active_session_id = session_id
+            print(f"[SESSION] Started session #{self.active_session_id} at {now.isoformat()}")
+            return self.active_session_id
+
+    def stop_session(self) -> None:
+        now = datetime.now(timezone.utc)
+        with self.lock:
+            self._stop_session_unlocked(now)
+        self.flush()
+
+    def _stop_session_unlocked(self, ended_at: datetime) -> None:
+        if self.active_session_id is None:
+            print("[SESSION] STOP received, but no active session is running.")
+            return
+
+        sid = self.active_session_id
+        self.active_session_id = None
+
+        if self.pg_conn or self._connect_pg():
+            try:
+                assert self.pg_conn is not None
+                with self.pg_conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        UPDATE sessions
+                        SET ended_at = %s, status = 'COMPLETED'
+                        WHERE id = %s;
+                        """,
+                        (ended_at, sid),
+                    )
+            except Exception as exc:
+                print(f"[DB] Tiger Data stop_session failed ({exc}), updating SQLite.")
+                self.pg_conn = None
+
+        with sqlite3.connect(self.sqlite_path) as conn:
+            conn.execute(
+                "UPDATE sessions SET ended_at = ?, status = 'COMPLETED' WHERE id = ?;",
+                (ended_at.isoformat(), sid),
+            )
+        print(f"[SESSION] Stopped session #{sid} at {ended_at.isoformat()}")
+
+    def enqueue_telemetry(self, payload: dict[str, Any], default_source: str) -> None:
+        ts_raw = payload.get("ts")
+        if isinstance(ts_raw, (int, float)):
+            dt = datetime.fromtimestamp(float(ts_raw), tz=timezone.utc)
+        else:
+            dt = datetime.now(timezone.utc)
+
+        source = payload.get("source", default_source)
+        bpm = payload.get("bpm")
+        accel_g = payload.get("accel_g")
+        xyz = payload.get("xyz")
+        speed = payload.get("speed")
+        fall_detected = payload.get("fall_detected")
+
+        should_flush = False
+        with self.lock:
+            row = (
+                dt,
+                self.active_session_id,
+                source,
+                int(bpm) if bpm is not None else None,
+                float(accel_g) if accel_g is not None else None,
+                json.dumps(xyz) if xyz is not None else None,
+                float(speed) if speed is not None else None,
+                bool(fall_detected) if fall_detected is not None else None,
+            )
+            self.buffer.append(row)
+            if len(self.buffer) >= MAX_BATCH_SIZE:
+                should_flush = True
+
+        if should_flush:
+            self.flush()
+
+    def flush(self) -> None:
+        with self.lock:
+            if not self.buffer:
+                return
+            batch = self.buffer[:]
+            self.buffer.clear()
+
+        # Attempt primary write to Tiger Data Cloud
+        if self.pg_conn or self._connect_pg():
+            try:
+                assert self.pg_conn is not None
+                with self.pg_conn.cursor() as cur:
+                    cur.executemany(
+                        """
+                        INSERT INTO telemetry_points (
+                            time, session_id, source, bpm, accel_g, xyz, speed, fall_detected
+                        )
+                        VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s, %s);
+                        """,
+                        batch,
+                    )
+                return
+            except Exception as exc:
+                print(f"[DB] Tiger Data batch insert failed ({exc}). Writing {len(batch)} rows to SQLite.")
+                self.pg_conn = None
+
+        # Fallback write to local SQLite
+        sqlite_rows = [
+            (
+                r[0].isoformat(),
+                r[1],
+                r[2],
+                r[3],
+                r[4],
+                r[5],
+                r[6],
+                int(r[7]) if r[7] is not None else None,
+            )
+            for r in batch
+        ]
+        with sqlite3.connect(self.sqlite_path) as conn:
+            conn.executemany(
+                """
+                INSERT INTO telemetry_points (
+                    time, session_id, source, bpm, accel_g, xyz, speed, fall_detected
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+                """,
+                sqlite_rows,
+            )
+
+
+def create_mqtt_worker(db: TelemetryDatabase) -> mqtt.Client:
+    def on_connect(client: mqtt.Client, _userdata: Any, _flags: Any, reason_code: Any, _properties: Any = None) -> None:
+        print(f"[MQTT] Connected to {MQTT_BROKER_IP}:{MQTT_BROKER_PORT} (rc={reason_code})")
+        client.subscribe("climbbud/#")
+        print("[MQTT] Subscribed to 'climbbud/#'")
+
+    def on_message(_client: mqtt.Client, _userdata: Any, msg: mqtt.MQTTMessage) -> None:
+        topic = msg.topic
+        raw_payload = msg.payload.decode("utf-8", errors="replace").strip()
+
+        if topic == "climbbud/control/session":
+            command = raw_payload.upper()
+            # Support either raw "START"/"STOP" strings or JSON {"command": "START"}
+            if command.startswith("{"):
+                try:
+                    data = json.loads(raw_payload)
+                    command = str(data.get("command") or data.get("action") or "").upper()
+                except json.JSONDecodeError:
+                    pass
+
+            if command == "START":
+                db.start_session()
+            elif command == "STOP":
+                db.stop_session()
+            else:
+                print(f"[MQTT] Unknown session control command: {raw_payload}")
+            return
+
+        if topic in ("climbbud/telemetry/watch", "climbbud/telemetry/vision"):
+            default_source = "watch" if topic.endswith("watch") else "vision"
+            try:
+                payload = json.loads(raw_payload)
+                if isinstance(payload, dict):
+                    db.enqueue_telemetry(payload, default_source=default_source)
+            except json.JSONDecodeError:
+                print(f"[MQTT] Invalid JSON on {topic}: {raw_payload}")
+
+    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+    client.on_connect = on_connect
+    client.on_message = on_message
+    client.connect(MQTT_BROKER_IP, MQTT_BROKER_PORT, keepalive=60)
+    return client
+
+
+def main() -> None:
+    db = TelemetryDatabase(pg_url=TIGER_DATA_URL, sqlite_path=SQLITE_DB_PATH)
+    mqtt_client = create_mqtt_worker(db)
+    mqtt_client.loop_start()
+
+    try:
+        while True:
+            time.sleep(FLUSH_INTERVAL_SEC)
+            db.flush()
+    except KeyboardInterrupt:
+        print("\n[DB] Shutting down telemetry database worker...")
+    finally:
+        mqtt_client.loop_stop()
+        mqtt_client.disconnect()
+        db.flush()
+        if db.pg_conn:
+            db.pg_conn.close()
+
+
+if __name__ == "__main__":
+    main()

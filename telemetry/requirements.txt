@@ -5,3 +5,6 @@ psycopg[binary]
 google-genai
 google-genai
 pydantic
+
+fastapi
+uvicorn

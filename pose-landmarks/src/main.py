@@ -8,6 +8,7 @@ import os
 from recognition import PoseDetector
 import utils
 import framebox as app
+from stream_server import FrameBroadcaster, start_stream_server, stop_stream_server
 
 io = None
 running = True
@@ -130,6 +131,38 @@ def center(midpoint, size):
         io.rotate_down(inc=abs(tilt_output))
         print(f"rotate down: {abs(tilt_output):.2f}")
 
+def render_overlay(frame, scale, rectangle, fps_avg, target, target_src, body, simulated):
+    """
+    Scale + mirror a copy of the (already pose-annotated) frame and add the text overlay.
+    Used for both the local preview window and the network stream.
+    """
+    if scale != 1:
+        frame = cv2.resize(frame, None, fx=scale, fy=scale, interpolation=cv2.INTER_LINEAR)
+    # Mirror the output only (after tracking) so servo direction is unaffected
+    frame = cv2.flip(frame, 1)
+    if rectangle:
+        frame = utils.put_text_on_image(frame, position=(10, 150),
+            text=f"target {target} [{target_src}]")
+        frame = utils.put_text_on_image(frame, position=(10,50), text='FPS: {:.2f}'.format( fps_avg ))
+        frame = utils.put_text_on_image(frame, position=(10, 200),
+            text=f"body {body['center']} ({body['source']}) norm {body['normalized']}")
+    if simulated:
+        frame = utils.put_text_on_image(frame, position=(10, 100),
+            text=f"pan {io.get_base_angle():.1f}  tilt {io.get_camera_angle():.1f}", color=(0, 255, 255))
+    return frame
+
+
+def to_jsonable(value):
+    """Convert numpy scalars / tuples nested in dicts into plain JSON types."""
+    if isinstance(value, dict):
+        return {k: to_jsonable(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [to_jsonable(v) for v in value]
+    if hasattr(value, "item"):
+        return value.item()
+    return value
+
+
 def main():
     global io, args
     parser = argparse.ArgumentParser(description='Head tracking (YOLO11n-pose) with servo control')
@@ -143,6 +176,13 @@ def main():
     parser.add_argument('--max-fps', type=float, default=None,
                         help='Cap the loop rate. Defaults to 8 in --mock to match a Pi 3; the PID gains '
                              'were tuned at that speed and oscillate at desktop frame rates')
+    parser.add_argument('--stream', action='store_true',
+                        help='Serve the annotated feed over HTTP (MJPEG) for viewing from another device')
+    parser.add_argument('--stream-host', default='0.0.0.0', help='Stream bind address (default 0.0.0.0)')
+    parser.add_argument('--stream-port', type=int, default=8080, help='Stream port (default 8080)')
+    parser.add_argument('--stream-quality', type=int, default=70, help='Stream JPEG quality 1-100 (default 70)')
+    parser.add_argument('--stream-scale', type=float, default=1.0,
+                        help='Resize factor for the streamed frames (default 1.0)')
     args = parser.parse_args()
 
     if args.mock:
@@ -163,6 +203,11 @@ def main():
         return
 
     detector = PoseDetector(model=FILE, confidence_thr=0.5, overlap_thr=0.45)
+
+    broadcaster = stream = None
+    if args.stream:
+        broadcaster = FrameBroadcaster(quality=args.stream_quality)
+        stream = start_stream_server(broadcaster, args.stream_host, args.stream_port)
 
     if not args.headless:
         # WINDOW_NORMAL lets you drag-resize the preview as well
@@ -211,25 +256,36 @@ def main():
                     cv2.circle(frame, head, 4 if tracking_body else 7, (0, 0, 255), -1)
                 center(target, frame.shape[:2])
 
-            if not args.headless:
+            if not rectangle:
+                target = target_src = body = None
+
+            if broadcaster is not None:
+                broadcaster.publish_data(to_jsonable({
+                    "timestamp": time.time(),
+                    "fps": fps_avg,
+                    "frame_shape": frame.shape[:2],
+                    "detected": bool(rectangle),
+                    "target": target,
+                    "target_source": target_src,
+                    "body": body,
+                    "keypoints": PoseDetector.keypoint_positions(kpts[idx], detector.kpt_thr)
+                                 if rectangle else None,
+                    "pan": io.get_base_angle(),
+                    "tilt": io.get_camera_angle(),
+                }))
+
+            show_window = not args.headless
+            streaming = broadcaster is not None and broadcaster.has_clients
+            if show_window or streaming:
                 if not args.no_pose:
                     app.draw_pose(frame, kpts, detector.kpt_thr, highlight=idx)
-                # Enlarge the preview only (tracking above used the original frame)
-                if args.display_scale != 1:
-                    frame = cv2.resize(frame, None, fx=args.display_scale, fy=args.display_scale,
-                                       interpolation=cv2.INTER_LINEAR)
-                # Mirror the preview only (after tracking) so servo direction is unaffected
-                frame = cv2.flip(frame, 1)
-                if rectangle:
-                    frame = utils.put_text_on_image(frame, position=(10, 150),
-                        text=f"target {target} [{target_src}]")
-                    frame = utils.put_text_on_image(frame, position=(10,50), text='FPS: {:.2f}'.format( fps_avg ))
-                    frame = utils.put_text_on_image(frame, position=(10, 200),
-                        text=f"body {body['center']} ({body['source']}) norm {body['normalized']}")
-                if simulated:
-                    frame = utils.put_text_on_image(frame, position=(10, 100),
-                        text=f"pan {io.get_base_angle():.1f}  tilt {io.get_camera_angle():.1f}", color=(0, 255, 255))
+                overlay = (rectangle, fps_avg, target, target_src, body, simulated)
+                if streaming:
+                    broadcaster.publish(render_overlay(frame, args.stream_scale, *overlay))
 
+            if show_window:
+                # Enlarge the preview only (tracking above used the original frame)
+                frame = render_overlay(frame, args.display_scale, *overlay)
                 cv2.imshow('frame', frame)
                 k = cv2.waitKey(1) & 0xFF#copied straight from another repo. not sure why they used 0xff. maybe to extract just the ascii bytes
                 if k == 27 or k == ord('q'):
@@ -242,6 +298,9 @@ def main():
                 remaining = (1.0 / max_fps) - (time.perf_counter() - loop_start)
                 if remaining > 0:
                     time.sleep(remaining)
+    if stream is not None:
+        print("[INFO] Stopping stream server...")
+        stop_stream_server(stream)
     io.center()
     # Cleanup resources
     print("[INFO] Releasing camera...")

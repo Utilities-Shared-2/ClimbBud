@@ -10,6 +10,7 @@ from vosk import Model, KaldiRecognizer
 BASE_DIR = Path(__file__).resolve().parent
 MODEL_PATH = BASE_DIR / "models" / "vosk-model-small-en-us-0.15"
 RECORDINGS_DIR = BASE_DIR / "recordings"
+IsVoiceRecorded = False
 
 SAMPLE_RATE = 16000
 BLOCKSIZE = 4000
@@ -19,14 +20,23 @@ model = Model(str(MODEL_PATH))
 rec = KaldiRecognizer(model, SAMPLE_RATE, GRAMMAR)
 rec.SetWords(False)
 
-is_recording = False
+is_currently_recording = False
 audio_queue: queue.Queue[bytes] = queue.Queue()
 current_file: sf.SoundFile | None = None
 
 
+def setIsVoiceRecorded(isRecorded) -> None:
+    """
+    Define wether voice is recording during the video taping
+    by default this value is false
+    """
+    global IsVoiceRecorded
+    IsVoiceRecorded = isRecorded
+
+
 def start_recording() -> None:
-    global is_recording, current_file
-    if not is_recording:
+    global is_currently_recording, current_file
+    if not is_currently_recording and IsVoiceRecorded:
         RECORDINGS_DIR.mkdir(parents=True, exist_ok=True)
         filepath = RECORDINGS_DIR / f"rec_{int(time.time())}.wav"
         current_file = sf.SoundFile(
@@ -36,14 +46,14 @@ def start_recording() -> None:
             channels=1,
             subtype="PCM_16",
         )
-        is_recording = True
+        is_currently_recording = True
         print(f"[ACTION] Started recording -> {filepath.relative_to(BASE_DIR)}")
 
 
 def end_recording() -> None:
-    global is_recording, current_file
-    if is_recording:
-        is_recording = False
+    global is_currently_recording, current_file
+    if is_currently_recording:
+        is_currently_recording = False
         if current_file is not None:
             current_file.close()
             current_file = None
@@ -63,7 +73,7 @@ def audio_callback(indata, frames, time_info, status) -> None:
         print(f"[AUDIO STATUS] {status}")
     raw_bytes = bytes(indata)
     audio_queue.put(raw_bytes)
-    if is_recording and current_file is not None:
+    if is_currently_recording and current_file is not None:
         samples = np.frombuffer(raw_bytes, dtype=np.int16)
         current_file.write(samples)
 

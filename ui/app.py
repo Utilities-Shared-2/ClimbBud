@@ -1,18 +1,42 @@
 """ClimbBud Flask dashboard.
 
-Run:  pip install flask
-      python app.py   ->  http://localhost:5000
+Run from the repository root: python ui/app.py
+The dashboard listens on 0.0.0.0:5000; open http://localhost:5000.
 
-Live heart-rate and movement readings come from the telemetry database.
+Fall detection settings can be supplied as environment variables or in
+telemetry/.env before starting the dashboard (environment takes precedence):
+  POSE_URL                       Full pose service /pose URL; empty disables it.
+  FALL_ACCEL_G                   Impact threshold in g (default 2.2).
+  FALL_INACTIVITY_SEC            Watch stillness duration in seconds (10).
+  FALL_DROP_FRAC                 Downward drop as fraction of frame height (0.25).
+  POSE_STILL_SEC                 Camera stillness duration in seconds (5).
+  FALL_COOLDOWN_SEC              Cooldown after dismissal in seconds (5).
+  FALL_INACTIVITY_REQUIRES_EVENT Require a preceding moderate event (default 1).
+  FALL_SIMULATE_ENABLED          Enable the demo endpoint (default 1; 0 disables).
+  FLASK_DEBUG                    Enable Flask debug mode (default off).
+
+On the Live tab, enable sound, click Simulate Fall, then Dismiss. Browsers
+require a user gesture to enable audio. Simulation exercises the alert UI but
+does not test sensor detection. The simulate and dismiss endpoints have no
+authentication; disable simulation outside the demo and do not expose the
+debugger through a public tunnel.
+
+Alerts are evaluated when /api/live is requested and are stored only in process
+memory. A telemetry error returns HTTP 503 with both error and fall fields.
+Detection is experimental and must not be relied on as a safety system.
 """
 import atexit
+import json
 import math
 import os
 import random
 import sys
 import threading
 import time
+from collections import deque
 from pathlib import Path
+from urllib.error import URLError
+from urllib.request import urlopen
 
 from dotenv import load_dotenv
 from flask import Flask, jsonify, render_template
@@ -21,10 +45,93 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from telemetry.fall_detection import FallConfig, FallMonitor, PoseSample, pose_sample_from_payload
+
 # Load environment variables from telemetry/.env
 load_dotenv(REPO_ROOT / "telemetry" / ".env")
 
 app = Flask(__name__)
+
+
+class PosePoller:
+    """Collect recent, distinct pose frames without blocking dashboard requests."""
+
+    def __init__(self, url: str, history_sec: float, stale_sec: float = 5.0):
+        self.url = url
+        self.history_sec = history_sec
+        self.stale_sec = stale_sec
+        self._samples: deque[PoseSample] = deque(maxlen=1024)
+        self._lock = threading.Lock()
+        self._last_source_timestamp: float | None = None
+        self._last_new_at: float | None = None
+        self._unavailable = False
+
+    def poll_once(self):
+        try:
+            with urlopen(self.url, timeout=1.0) as response:
+                data = response.read(65537)
+            if len(data) > 65536:
+                raise ValueError("pose response is too large")
+            payload = json.loads(data)
+            if not isinstance(payload, dict):
+                raise ValueError("pose response must be a JSON object")
+            source_timestamp = payload.get("timestamp")
+            if (
+                isinstance(source_timestamp, bool)
+                or not isinstance(source_timestamp, (int, float))
+                or not math.isfinite(source_timestamp)
+            ):
+                raise ValueError("pose response needs a finite timestamp")
+            now = time.time()
+            sample = pose_sample_from_payload(payload, now)
+            if sample.y is not None and not math.isfinite(sample.y):
+                raise ValueError("pose response has an invalid body position")
+            with self._lock:
+                if self._last_source_timestamp is not None:
+                    if source_timestamp == self._last_source_timestamp:
+                        if self._last_new_at is not None and now - self._last_new_at > self.stale_sec:
+                            raise ValueError("pose feed stopped producing new frames")
+                        return
+                    if source_timestamp < self._last_source_timestamp:
+                        self._samples.clear()
+                self._last_source_timestamp = source_timestamp
+                self._last_new_at = now
+                self._samples.append(sample)
+                self._prune(now)
+            if self._unavailable:
+                app.logger.info("Pose feed recovered")
+                self._unavailable = False
+        except (URLError, OSError, ValueError, UnicodeError) as exc:
+            with self._lock:
+                self._samples.clear()
+            if not self._unavailable:
+                app.logger.warning("Pose feed unavailable: %s", exc)
+                self._unavailable = True
+
+    def _prune(self, now):
+        while self._samples and self._samples[0].ts < now - self.history_sec:
+            self._samples.popleft()
+
+    def samples(self):
+        with self._lock:
+            self._prune(time.time())
+            return list(self._samples)
+
+    def run(self):
+        while True:
+            self.poll_once()
+            time.sleep(0.5)
+
+
+pose_url = os.getenv("POSE_URL", "").strip()
+fall_config = FallConfig.from_env()
+fall_monitor = FallMonitor(fall_config)
+pose_poller = (
+    PosePoller(pose_url, fall_config.pose_history_sec, fall_config.stale_sec)
+    if pose_url else None
+)
+if pose_poller is not None:
+    threading.Thread(target=pose_poller.run, daemon=True, name="pose-poller").start()
 
 state = {
     "recording": False,
@@ -116,19 +223,27 @@ def index():
     return render_template("index.html", route=ROUTE, history=HISTORY)
 
 
+def evaluate_fall(history):
+    pose_samples = pose_poller.samples() if pose_poller is not None else ()
+    return fall_monitor.evaluate(history, state["recording"], pose_samples)
+
+
 @app.route("/api/live")
 def live():
     try:
         from telemetry.db import load_live_telemetry
     except ImportError as exc:
         app.logger.exception("Telemetry database dependencies are unavailable")
-        return jsonify(error=f"Telemetry database dependencies are unavailable: {exc}"), 503
+        return jsonify(
+            error=f"Telemetry database dependencies are unavailable: {exc}",
+            fall=evaluate_fall([]),
+        ), 503
 
     try:
         data = load_live_telemetry()
     except Exception:
         app.logger.exception("Unable to load live telemetry from the database")
-        return jsonify(error="Live telemetry is unavailable."), 503
+        return jsonify(error="Live telemetry is unavailable.", fall=evaluate_fall([])), 503
 
     latest = data["latest"]
     return jsonify(
@@ -141,7 +256,20 @@ def live():
         session=data["session"],
         latest=latest,
         history=data["history"],
+        fall=evaluate_fall(data["history"] if latest is not None else []),
     )
+
+
+@app.route("/api/fall/dismiss", methods=["POST"])
+def dismiss_fall():
+    return jsonify(fall=fall_monitor.dismiss())
+
+
+@app.route("/api/fall/simulate", methods=["POST"])
+def simulate_fall():
+    if not fall_monitor.simulate():
+        return jsonify(error="Fall simulation is disabled."), 404
+    return jsonify(fall=fall_monitor.state())
 
 
 @app.route("/api/recording/toggle", methods=["POST"])
@@ -272,5 +400,10 @@ def generate_session_summary(session_key: str):
         return jsonify(error=f"Field report dependencies are unavailable: {exc}"), 503
 
 
+def run_dashboard():
+    debug = os.getenv("FLASK_DEBUG", "").strip().lower() in {"1", "true", "yes", "on"}
+    app.run(host="0.0.0.0", port=5000, debug=debug)
+
+
 if __name__ == "__main__":
-    app.run(debug=True)
+    run_dashboard()

@@ -5,6 +5,142 @@ const chartLine = document.getElementById("line");
 const chartArea = document.getElementById("area");
 const chartHead = document.getElementById("head");
 const intensityHistory = [];
+const fallAlert = document.getElementById("fallAlert");
+const fallReason = document.getElementById("fallReason");
+const fallSoundWarning = document.getElementById("fallSoundWarning");
+const soundStatus = document.getElementById("soundStatus");
+const enableSoundBtn = document.getElementById("enableSoundBtn");
+const simulateFallBtn = document.getElementById("simulateFallBtn");
+const dismissFallBtn = document.getElementById("dismissFallBtn");
+const fallControlError = document.getElementById("fallControlError");
+const liveError = document.getElementById("liveError");
+let audioContext = null;
+let alertOscillator = null;
+let alertGain = null;
+let beepTimer = null;
+let soundFailed = false;
+let soundError = null;
+let fallActive = false;
+let fallActionPending = false;
+let fallVersion = 0;
+let liveRequest = 0;
+let lastLiveResponse = 0;
+
+function stopAlertSound() {
+  if (beepTimer !== null) {
+    window.clearInterval(beepTimer);
+    beepTimer = null;
+  }
+  if (alertOscillator) {
+    alertOscillator.stop();
+    alertOscillator.disconnect();
+    alertOscillator = null;
+  }
+  if (alertGain) {
+    alertGain.disconnect();
+    alertGain = null;
+  }
+}
+
+function syncAlertSound() {
+  const soundReady = audioContext && audioContext.state === "running" && !soundFailed;
+  fallSoundWarning.hidden = Boolean(soundReady);
+  enableSoundBtn.textContent = soundReady ? "Alert sound enabled" : "Enable alert sound";
+  soundStatus.textContent = soundReady
+    ? "Alert sound enabled."
+    : (soundError || "Alert sound is off until enabled.");
+  if (!fallActive || !soundReady) {
+    stopAlertSound();
+    return;
+  }
+  if (alertOscillator) return;
+
+  try {
+    const oscillator = audioContext.createOscillator();
+    const gain = audioContext.createGain();
+    oscillator.frequency.value = 880;
+    gain.gain.value = 0;
+    oscillator.connect(gain);
+    gain.connect(audioContext.destination);
+    oscillator.start();
+    alertOscillator = oscillator;
+    alertGain = gain;
+    const beep = () => {
+      const now = audioContext.currentTime;
+      gain.gain.setValueAtTime(0.12, now);
+      gain.gain.setValueAtTime(0, now + 0.2);
+    };
+    beep();
+    beepTimer = window.setInterval(beep, 500);
+  } catch (error) {
+    console.error(error);
+    stopAlertSound();
+    soundFailed = true;
+    soundError = "Unable to play alert sound. Try enabling it again.";
+    fallSoundWarning.hidden = false;
+    enableSoundBtn.textContent = "Enable alert sound";
+    soundStatus.textContent = soundError;
+  }
+}
+
+async function enableAlertSound() {
+  try {
+    soundFailed = false;
+    soundError = null;
+    if (!audioContext) {
+      const AudioContext = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContext) throw new Error("Web Audio is not supported by this browser.");
+      audioContext = new AudioContext();
+      audioContext.onstatechange = syncAlertSound;
+    }
+    if (audioContext.state !== "running") await audioContext.resume();
+    if (audioContext.state !== "running") throw new Error("Browser did not enable audio.");
+    syncAlertSound();
+  } catch (error) {
+    console.error(error);
+    soundFailed = true;
+    soundError = "Unable to enable alert sound. Check browser audio settings.";
+    syncAlertSound();
+  }
+}
+
+function showFall(fall) {
+  if (!fall || typeof fall.active !== "boolean") return;
+  fallActive = fall.active;
+  fallAlert.hidden = !fallActive;
+  document.body.classList.toggle("fall-alert-active", fallActive);
+  const reason = fallActive ? (fall.reason || "Please check on the climber.") : "";
+  if (fallReason.textContent !== reason) fallReason.textContent = reason;
+  if (typeof fall.simulate_enabled === "boolean") {
+    simulateFallBtn.hidden = !fall.simulate_enabled;
+  }
+  syncAlertSound();
+}
+
+async function changeFallState(endpoint) {
+  if (fallActionPending) return;
+  fallActionPending = true;
+  fallVersion++;
+  dismissFallBtn.disabled = true;
+  simulateFallBtn.disabled = true;
+  fallControlError.hidden = true;
+  try {
+    const response = await fetch(endpoint, { method: "POST" });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || `Fall API returned ${response.status}`);
+    showFall(data.fall);
+  } catch (error) {
+    console.error(error);
+    fallControlError.textContent = error.message || "Unable to update fall alert.";
+    fallControlError.hidden = false;
+  } finally {
+    fallActionPending = false;
+    fallVersion++;
+    dismissFallBtn.disabled = false;
+    simulateFallBtn.disabled = false;
+    await fetchLive();
+  }
+}
 
 function renderRoute() {
   if (!routeLine || !routeNodes) return;
@@ -54,10 +190,16 @@ function renderChart() {
 }
 
 async function fetchLive() {
+  const request = ++liveRequest;
+  const version = fallVersion;
   try {
     const response = await fetch("/api/live");
-    if (!response.ok) throw new Error(`Live API returned ${response.status}`);
     const data = await response.json();
+    if (request < lastLiveResponse) return;
+    lastLiveResponse = request;
+    if (!fallActionPending && version === fallVersion) showFall(data.fall);
+    if (!response.ok) throw new Error(data.error || `Live API returned ${response.status}`);
+    liveError.hidden = true;
 
     document.getElementById("bpm").textContent = data.bpm ?? "--";
     document.getElementById("pr").textContent = data.pr;
@@ -77,6 +219,11 @@ async function fetchLive() {
     }
   } catch (error) {
     console.error(error);
+    if (request >= lastLiveResponse) {
+      lastLiveResponse = request;
+      liveError.textContent = error.message || "Unable to load live telemetry.";
+      liveError.hidden = false;
+    }
   }
 }
 
@@ -196,7 +343,17 @@ document.querySelectorAll(".nav button").forEach(button => {
   button.addEventListener("click", () => showTab(button.dataset.tab));
 });
 
+enableSoundBtn.addEventListener("click", enableAlertSound);
+simulateFallBtn.addEventListener("click", () => {
+  void enableAlertSound();
+  void changeFallState("/api/fall/simulate");
+});
+dismissFallBtn.addEventListener("click", () => {
+  void changeFallState("/api/fall/dismiss");
+});
+
 document.getElementById("recBtn").addEventListener("click", async () => {
+  void enableAlertSound();
   try {
     const response = await fetch("/api/recording/toggle", { method: "POST" });
     if (!response.ok) throw new Error(`Recording API returned ${response.status}`);

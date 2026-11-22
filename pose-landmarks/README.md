@@ -84,6 +84,36 @@ Then, from any device on the same network, open `http://[pi ip]:8080/`.
 - Options: `--stream-port`, `--stream-host`, `--stream-quality` (JPEG, default 70), `--stream-scale` (lower this on a Pi 3 to save CPU/bandwidth)
 - Frames are only encoded while someone is watching. There is no authentication, so only use it on a trusted network. On Windows, allow Python through the firewall for the port.
 
+**Using the pose feed for fall warnings**
+
+Start the pose service with `--stream` as shown above and verify
+`http://<pi-ip>:8080/pose` returns JSON with a changing `timestamp`. The
+dashboard must be able to reach that address. On the dashboard machine, set
+`POSE_URL` to the full URL before starting the app. For example, from the
+repository root in Windows PowerShell:
+
+```powershell
+$env:POSE_URL = "http://<pi-ip>:8080/pose"
+python ui\app.py
+```
+
+Replace `<pi-ip>` with the Pi's address, or use `127.0.0.1` if both services
+run on the same machine. `POSE_URL` can also be set in `telemetry/.env`;
+leave it unset to disable pose polling. The dashboard logs pose feed failures
+and continues without camera data. The feed is unauthenticated: keep it on a
+trusted network rather than exposing it publicly.
+
+The Live tab's **Simulate Fall** button tests the warning and browser sound,
+not the camera or watch detection. Enable sound with a click, then dismiss the
+warning. Fall alerts are experimental and are not a safety system. See the
+[dashboard settings](../ui/app.py) for thresholds and demo configuration.
+
+For a live sensor test, use a fresh sample in an isolated test database.
+[seed_demo.py](../telemetry/seed_demo.py) writes to PostgreSQL and its simulated
+fall is approximately 25 seconds old when inserted, outside the live detector's
+10-second impact window; it is not a live alert test. Do not seed a database
+containing important data.
+
 ## Running on QNX 8.0 (Raspberry Pi)
 
 OpenVINO and pigpio don't exist on QNX, and `cv2.VideoCapture` has no camera backend there, so the code picks QNX-friendly backends automatically when `sys.platform` is QNX:

@@ -1,10 +1,247 @@
+import io
+import json
 import sys
+import threading
 import types
 import unittest
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
+from urllib.error import URLError
 
-from ui.app import app
+import requests
+from telemetry.fall_detection import FallConfig, FallMonitor, PoseSample
+from ui.app import PosePoller, app, run_dashboard, state
+
+
+class PosePollerTests(unittest.TestCase):
+    def setUp(self):
+        self.poller = PosePoller("http://camera:8080/pose", history_sec=5)
+
+    def poll_payload(self, timestamp, now, detected=True):
+        payload = {
+            "timestamp": timestamp,
+            "detected": detected,
+            "body": {"center": [10, 60]},
+            "frame_shape": [200, 300],
+        }
+        with patch("ui.app.urlopen", return_value=io.BytesIO(json.dumps(payload).encode())) as request:
+            with patch("ui.app.time.time", return_value=now):
+                self.poller.poll_once()
+        request.assert_called_once_with("http://camera:8080/pose", timeout=1.0)
+
+    def test_poller_records_distinct_frames_and_prunes_old_samples(self):
+        self.poll_payload(10, 100)
+        self.poll_payload(10, 101)
+        self.poll_payload(11, 102, detected=False)
+        with patch("ui.app.time.time", return_value=102):
+            self.assertEqual(self.poller.samples(), [
+                PoseSample(100, True, 0.3),
+                PoseSample(102, False, None),
+            ])
+        with patch("ui.app.time.time", return_value=106):
+            self.assertEqual(self.poller.samples(), [PoseSample(102, False, None)])
+
+    def test_failure_clears_history_and_same_frame_does_not_restore_it(self):
+        self.poll_payload(10, 100)
+        with patch("ui.app.urlopen", side_effect=URLError("offline")):
+            with self.assertLogs(app.logger, level="WARNING"):
+                self.poller.poll_once()
+        self.poll_payload(10, 101)
+        with patch("ui.app.time.time", return_value=101):
+            self.assertEqual(self.poller.samples(), [])
+        self.poll_payload(11, 102)
+        with patch("ui.app.time.time", return_value=102):
+            self.assertEqual(self.poller.samples(), [PoseSample(102, True, 0.3)])
+
+    def test_invalid_payload_clears_history(self):
+        self.poll_payload(10, 100)
+        with patch("ui.app.urlopen", return_value=io.BytesIO(b'{"timestamp": NaN}')):
+            with self.assertLogs(app.logger, level="WARNING"):
+                self.poller.poll_once()
+        self.assertEqual(self.poller.samples(), [])
+
+    def test_frozen_frame_is_reported_and_clears_history(self):
+        self.poll_payload(10, 100)
+        with self.assertLogs(app.logger, level="WARNING") as logs:
+            self.poll_payload(10, 106)
+        self.assertIn("stopped producing new frames", logs.output[0])
+        self.assertEqual(self.poller.samples(), [])
+
+    def test_timestamp_reset_starts_new_history(self):
+        self.poll_payload(10, 100)
+        self.poll_payload(1, 101)
+        with patch("ui.app.time.time", return_value=101):
+            self.assertEqual(self.poller.samples(), [PoseSample(101, True, 0.3)])
+
+    def test_reads_pose_from_http_server(self):
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                body = json.dumps({
+                    "timestamp": 10,
+                    "detected": True,
+                    "body": {"center": [10, 60]},
+                    "frame_shape": [200, 300],
+                }).encode()
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *_args):
+                pass
+
+        server = HTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever)
+        thread.start()
+        try:
+            poller = PosePoller(f"http://127.0.0.1:{server.server_port}/pose", 5)
+            poller.poll_once()
+            self.assertEqual(len(poller.samples()), 1)
+            self.assertEqual(poller.samples()[0].y, 0.3)
+        finally:
+            server.shutdown()
+            thread.join()
+            server.server_close()
+
+
+class FallApiTests(unittest.TestCase):
+    def setUp(self):
+        self.client = app.test_client()
+        self.monitor = FallMonitor(FallConfig(), clock=lambda: 100.0)
+        self.monitor_patch = patch("ui.app.fall_monitor", self.monitor)
+        self.pose_patch = patch("ui.app.pose_poller", None)
+        self.monitor_patch.start()
+        self.pose_patch.start()
+        self.addCleanup(self.monitor_patch.stop)
+        self.addCleanup(self.pose_patch.stop)
+
+    def live(self, latest=None, history=None):
+        database = types.ModuleType("telemetry.db")
+        database.load_live_telemetry = lambda: {
+            "session": None,
+            "latest": latest,
+            "history": history or [],
+        }
+        with patch.dict(sys.modules, {"telemetry.db": database}):
+            return self.client.get("/api/live")
+
+    def test_watch_alert_is_latched_and_dismissed(self):
+        point = {
+            "time": 99,
+            "bpm": 120,
+            "speed": 0.5,
+            "accel_g": 1.0,
+            "fall_detected": True,
+        }
+        self.assertFalse(self.live().get_json()["fall"]["active"])
+        fall = self.live(point, [point]).get_json()["fall"]
+        self.assertTrue(fall["active"])
+        self.assertEqual(fall["source"], "watch")
+        self.assertTrue(self.live().get_json()["fall"]["active"])
+        dismissed = self.client.post("/api/fall/dismiss")
+        self.assertEqual(dismissed.status_code, 200)
+        self.assertFalse(dismissed.get_json()["fall"]["active"])
+        self.assertFalse(self.live(point, [point]).get_json()["fall"]["active"])
+
+    def test_pose_samples_feed_live_detection(self):
+        pose = SimpleNamespace(samples=lambda: [
+            PoseSample(99.5, True, 0.2),
+            PoseSample(100, True, 0.6),
+        ])
+        with patch("ui.app.pose_poller", pose):
+            fall = self.live().get_json()["fall"]
+        self.assertTrue(fall["active"])
+        self.assertEqual(fall["source"], "pose")
+
+    def test_old_watch_history_does_not_trigger_without_fresh_latest(self):
+        point = {"time": 99, "accel_g": 3.0}
+        self.assertFalse(self.live(None, [point]).get_json()["fall"]["active"])
+
+    def test_simulation_works_without_telemetry_and_dismiss_clears(self):
+        database = types.ModuleType("telemetry.db")
+        database.load_live_telemetry = lambda: (_ for _ in ()).throw(RuntimeError("offline"))
+        with patch.dict(sys.modules, {"telemetry.db": database}):
+            simulated = self.client.post("/api/fall/simulate")
+            self.assertEqual(simulated.status_code, 200)
+            self.assertEqual(simulated.get_json()["fall"]["source"], "simulated")
+            with self.assertLogs(app.logger, level="ERROR"):
+                live = self.client.get("/api/live")
+            self.assertEqual(live.status_code, 503)
+            self.assertTrue(live.get_json()["fall"]["active"])
+            self.assertFalse(self.client.post("/api/fall/dismiss").get_json()["fall"]["active"])
+
+    def test_simulation_visible_through_live_api(self):
+        response = self.client.post("/api/fall/simulate")
+        self.assertEqual(response.get_json()["fall"]["reason"], "Simulated fall (demo)")
+        self.assertEqual(self.live().get_json()["fall"]["source"], "simulated")
+        self.client.post("/api/fall/dismiss")
+        self.assertFalse(self.live().get_json()["fall"]["active"])
+
+    def test_pose_detection_remains_available_during_telemetry_failure(self):
+        database = types.ModuleType("telemetry.db")
+        database.load_live_telemetry = lambda: (_ for _ in ()).throw(RuntimeError("offline"))
+        pose = SimpleNamespace(samples=lambda: [
+            PoseSample(99.5, True, 0.2),
+            PoseSample(100, True, 0.6),
+        ])
+        with patch.dict(sys.modules, {"telemetry.db": database}):
+            with patch("ui.app.pose_poller", pose), self.assertLogs(app.logger, level="ERROR"):
+                response = self.client.get("/api/live")
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.get_json()["fall"]["source"], "pose")
+
+    def test_simulation_disabled_by_environment(self):
+        with patch.dict("os.environ", {"FALL_SIMULATE_ENABLED": "0"}):
+            disabled = FallMonitor(FallConfig.from_env(), clock=lambda: 100.0)
+        with patch("ui.app.fall_monitor", disabled):
+            self.assertFalse(self.live().get_json()["fall"]["simulate_enabled"])
+            self.assertEqual(self.client.post("/api/fall/simulate").status_code, 404)
+            self.assertFalse(disabled.state()["active"])
+
+
+class DashboardStartupTests(unittest.TestCase):
+    def test_server_binding_and_debug_flag(self):
+        with patch.dict("os.environ", {"FLASK_DEBUG": ""}), patch.object(app, "run") as run:
+            run_dashboard()
+            run.assert_called_once_with(host="0.0.0.0", port=5000, debug=False)
+        with patch.dict("os.environ", {"FLASK_DEBUG": "1"}), patch.object(app, "run") as run:
+            run_dashboard()
+            run.assert_called_once_with(host="0.0.0.0", port=5000, debug=True)
+
+
+class VideoStreamTests(unittest.TestCase):
+    def setUp(self):
+        self.client = app.test_client()
+
+    def test_live_includes_stream_status_even_when_telemetry_fails(self):
+        database = types.ModuleType("telemetry.db")
+        database.load_live_telemetry = lambda: (_ for _ in ()).throw(RuntimeError("offline"))
+        with patch.dict(state, {"stream_connected": True}), patch.dict(sys.modules, {"telemetry.db": database}):
+            with self.assertLogs(app.logger, level="ERROR"):
+                response = self.client.get("/api/live")
+        self.assertEqual(response.status_code, 503)
+        self.assertTrue(response.get_json()["stream_connected"])
+
+    def test_stream_route_proxies_and_closes_response(self):
+        upstream = Mock()
+        upstream.headers = {"Content-Type": "multipart/x-mixed-replace; boundary=frame"}
+        upstream.iter_content.return_value = iter([b"frame-data"])
+        with patch.dict(state, {"stream_connected": True}), patch("ui.app.requests.get", return_value=upstream):
+            response = self.client.get("/video/stream", buffered=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, b"frame-data")
+        self.assertEqual(response.content_type, "multipart/x-mixed-replace; boundary=frame")
+        upstream.close.assert_called_once()
+
+    def test_stream_rejects_upstream_failure(self):
+        upstream = Mock()
+        upstream.raise_for_status.side_effect = requests.HTTPError("upstream error")
+        with patch.dict(state, {"stream_connected": True}), patch("ui.app.requests.get", return_value=upstream):
+            with self.assertLogs(app.logger, level="WARNING"):
+                response = self.client.get("/video/stream")
+        self.assertEqual(response.status_code, 503)
+        upstream.close.assert_called_once()
 
 
 class StatsApiTests(unittest.TestCase):
@@ -52,6 +289,7 @@ class StatsApiTests(unittest.TestCase):
         self.assertEqual(payload["intensity"], 0.7)
         self.assertEqual(payload["session"]["id"], 8)
         self.assertEqual(payload["history"], live_data["history"])
+        self.assertIsInstance(payload["stream_connected"], bool)
 
     def test_stats_api_returns_aggregate_cards_and_session_metrics(self):
         database = types.ModuleType("telemetry.db")

@@ -37,6 +37,16 @@
     </button>
   </nav>
 
+  <div id="fallAlert" class="fall-alert" role="alert" hidden>
+    <div>
+      <strong>Possible fall detected</strong>
+      <p id="fallReason"></p>
+      <p id="fallSoundWarning" hidden>Alert sound is off. Enable it in the Live tab.</p>
+    </div>
+    <button id="dismissFallBtn" type="button">Dismiss</button>
+  </div>
+  <p id="fallControlError" class="fall-error" role="alert" hidden></p>
+
   <div class="hero">
     <svg class="mountains" viewBox="0 0 400 130" preserveAspectRatio="xMaxYMax meet" aria-hidden="true">
       <path d="M0 130 L90 20 L130 60 L180 0 L250 80 L290 50 L330 90 L400 40 V130Z" fill="#2c2a63" opacity=".75"/>
@@ -47,11 +57,17 @@
   <!-- LIVE -->
   <section id="tab-live" class="tab active">
     <div class="board">
+      <div class="fall-controls">
+        <button id="enableSoundBtn" type="button">Enable alert sound</button>
+        <button id="simulateFallBtn" type="button" hidden>Simulate Fall</button>
+        <span id="soundStatus" role="status">Alert sound is off until enabled.</span>
+      </div>
+      <p id="liveError" class="fall-error" role="status" hidden></p>
       <div class="grid">
         <figure class="cam" id="cam">
           <div class="rec"><i class="dot red"></i><span id="camTime">00:00:00</span></div>
           <div id="videoContainer" class="video-container" hidden>
-            <img id="videoStream" src="/video/stream" alt="Pose stream" onerror="handleVideoError()">
+            <img id="videoStream" alt="Pose stream" onerror="handleVideoError()">
           </div>
           <div id="disconnectedMessage" class="disconnected-message">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M1 1l22 22M1 23L23 1"/><circle cx="12" cy="12" r="9"/><path d="M12 7v2M12 15v2"/></svg>

@@ -29,6 +29,20 @@ h1 span{color:var(--purple-hi)}
 
 .tab{display:none}.tab.active{display:block}
 .board{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:24px;position:relative;z-index:1}
+.fall-alert{display:flex;align-items:center;justify-content:space-between;gap:18px;margin-top:18px;padding:16px 20px;background:#561d2c;border:2px solid #ff7777;border-radius:12px;animation:fall-pulse 1.5s ease-in-out infinite}
+.fall-alert[hidden],.fall-controls button[hidden],.fall-error[hidden]{display:none}
+.fall-alert strong{font-size:1.1rem}
+.fall-alert p{margin-top:4px;color:#ffe1e1}
+.fall-alert button,.fall-controls button{padding:9px 14px;border:1px solid #ffb1b1;border-radius:9px;background:#7b2639;font-weight:600}
+.fall-alert button:hover{background:#96344a}
+body.fall-alert-active .board{border-color:#b73c50}
+.fall-controls{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-bottom:16px}
+.fall-controls button{background:var(--panel2);border-color:var(--line)}
+.fall-controls button:hover{border-color:var(--purple-hi)}
+.fall-controls button:disabled,.fall-alert button:disabled{opacity:.6;cursor:wait}
+.fall-controls span{color:var(--muted);font-size:.9rem}
+.fall-error{margin:0 0 14px;color:#ffb1b1}
+@keyframes fall-pulse{50%{box-shadow:0 0 18px #ff5a5a80}}
 .grid{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(320px,.65fr);gap:24px;align-items:stretch}
 
 .cam{position:relative;aspect-ratio:16/10;border-radius:14px;overflow:hidden;border:1px solid #4b4a8a;
@@ -37,6 +51,7 @@ h1 span{color:var(--purple-hi)}
 .video-container{position:absolute;inset:0;width:100%;height:100%;background:#000;z-index:1}
 .video-container img{width:100%;height:100%;object-fit:cover}
 .disconnected-message{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;color:var(--muted);font-size:1rem;background:rgba(10,10,28,0.85);z-index:2}
+.disconnected-message[hidden]{display:none}
 .disconnected-message svg{width:48px;height:48px;opacity:0.6}
 #routeLine{fill:none;stroke:#7fb2ff;stroke-width:1.4;stroke-linecap:round;stroke-linejoin:round;vector-effect:non-scaling-stroke;stroke-width:5px;opacity:.9}
 #routeNodes circle{fill:#7f9cff;stroke:#c9dcff;stroke-width:2px;vector-effect:non-scaling-stroke}

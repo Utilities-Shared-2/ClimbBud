@@ -84,6 +84,43 @@ Then, from any device on the same network, open `http://[pi ip]:8080/`.
 - Options: `--stream-port`, `--stream-host`, `--stream-quality` (JPEG, default 70), `--stream-scale` (lower this on a Pi 3 to save CPU/bandwidth)
 - Frames are only encoded while someone is watching. There is no authentication, so only use it on a trusted network. On Windows, allow Python through the firewall for the port.
 
+**Using the pose feed for fall warnings**
+
+Start the pose service with `--stream` as shown above and verify
+`http://<pi-ip>:8080/pose` returns JSON with a changing `timestamp`. The
+dashboard must be able to reach that address. On the dashboard machine, set
+`POSE_URL` to the full URL before starting the app. For example, from the
+repository root in Windows PowerShell:
+
+```powershell
+$env:POSE_URL = "http://<pi-ip>:8080/pose"
+$env:POSE_STREAM_HOST = "<pi-ip>"
+python ui\app.py
+```
+
+Replace `<pi-ip>` with the Pi's address, or use `127.0.0.1` if both services
+run on the same machine. `POSE_URL` can also be set in `telemetry/.env`;
+leave it unset to disable pose polling. The dashboard logs pose feed failures
+and continues without camera data. The feed is unauthenticated: keep it on a
+trusted network rather than exposing it publicly.
+
+`POSE_URL` configures fall detection separately from the dashboard's video
+proxy. The video proxy uses `POSE_STREAM_HOST` (default `localhost`),
+`POSE_STREAM_PORT` (default `8080`) and `POSE_STREAM_SCHEME` (default `http`).
+For the two-Pi setup below, use the QNX tracker's port 8080 for both the pose
+and annotated video feeds, not the camera Pi's raw stream on port 8081.
+
+The Live tab's **Simulate Fall** button tests the warning and browser sound,
+not the camera or watch detection. Enable sound with a click, then dismiss the
+warning. Fall alerts are experimental and are not a safety system. See the
+[dashboard settings](../ui/app.py) for thresholds and demo configuration.
+
+For a live sensor test, use a fresh sample in an isolated test database.
+[seed_demo.py](../telemetry/seed_demo.py) writes to PostgreSQL and its simulated
+fall is approximately 25 seconds old when inserted, outside the live detector's
+10-second impact window; it is not a live alert test. Do not seed a database
+containing important data.
+
 ## Running on QNX 8.0 (Raspberry Pi) with a separate camera Pi
 
 QNX has no usable webcam path and can't compile packages, so the work is split across two devices:

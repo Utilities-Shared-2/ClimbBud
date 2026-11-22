@@ -66,6 +66,10 @@ class IoControl:
     def rotate_down(self, inc=defaultInc):
         self.camera_angle = max(self.PITCH_MIN, self.camera_angle - inc)
 
+    def move_to(self, pan, tilt):
+        self.base_angle = max(self.PAN_MIN, min(self.PAN_MAX, pan))
+        self.camera_angle = max(self.PITCH_MIN, min(self.PITCH_MAX, tilt))
+
     def get_base_angle(self):
         return self.base_angle
 

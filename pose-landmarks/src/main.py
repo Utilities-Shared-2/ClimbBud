@@ -11,6 +11,7 @@ from camera import open_camera, IS_QNX
 import utils
 import framebox as app
 from stream_server import FrameBroadcaster, start_stream_server, stop_stream_server
+from gimbal import SmoothGimbal, aim
 
 io = None
 running = True
@@ -213,8 +214,20 @@ def main():
     parser.add_argument('--no-pose', action='store_true', help='Hide the body pose landmarks')
     parser.add_argument('--camera', type=int, default=0, help='Webcam index (default 0)')
     parser.add_argument('--max-fps', type=float, default=None,
-                        help='Cap the loop rate. Defaults to 8 in --mock to match a Pi 3; the PID gains '
-                             'were tuned at that speed and oscillate at desktop frame rates')
+                        help='Cap the loop rate. With --tracker pid it defaults to 8 in --mock to match a '
+                             'Pi 3; the PID gains were tuned at that speed and oscillate at desktop frame '
+                             'rates. Use e.g. 2.2 with --mock to simulate the QNX Pi')
+    parser.add_argument('--tracker', choices=['smooth', 'pid'], default='smooth',
+                        help='smooth = each detection sets a target angle and a 50 Hz servo thread eases '
+                             'toward it (good for slow inference); pid = one PID step per frame (old behaviour)')
+    parser.add_argument('--hfov', type=float, default=60.0,
+                        help='Camera horizontal field of view in degrees (smooth tracker, default 60)')
+    parser.add_argument('--track-gain', type=float, default=0.7,
+                        help='Fraction of the angle error corrected per detection (smooth tracker, default 0.7)')
+    parser.add_argument('--max-speed', type=float, default=90.0,
+                        help='Servo speed cap in degrees/s (smooth tracker, default 90)')
+    parser.add_argument('--deadband', type=float, default=1.5,
+                        help='Ignore angle errors below this many degrees (smooth tracker, default 1.5)')
     parser.add_argument('--stream', action='store_true',
                         help='Serve the annotated feed over HTTP (MJPEG) for viewing from another device')
     parser.add_argument('--stream-host', default='0.0.0.0', help='Stream bind address (default 0.0.0.0)')
@@ -236,7 +249,9 @@ def main():
     else:
         io = load_io(io_backend)()
     simulated = hasattr(io, "view")
-    max_fps = args.max_fps if args.max_fps else (8.0 if simulated else None)
+    smooth = args.tracker == 'smooth'
+    max_fps = args.max_fps if args.max_fps else (8.0 if simulated and not smooth else None)
+    gimbal = SmoothGimbal(io, max_speed=args.max_speed).start() if smooth else None
 
     cap = open_camera(args.camera, args.camera_backend, url=args.camera_url)
     if not cap.isOpened():
@@ -270,8 +285,12 @@ def main():
                 io.center()
                 pan_pid.reset()
                 tilt_pid.reset()
+                if gimbal is not None:
+                    gimbal.resume()
                 print("[INFO] tracking resumed")
             else:
+                if gimbal is not None:
+                    gimbal.pause()
                 io.release()
                 print("[INFO] tracking paused (model + servos off)")
                 if broadcaster is not None:
@@ -287,7 +306,13 @@ def main():
             continue
 
         io.read_switch()
-        if not io.resetToggled:
+        if io.resetToggled:
+            # Limit switch held: the switch callback centred the servos. Keep the
+            # gimbal synced to HOME so it doesn't pull them back afterwards.
+            if gimbal is not None:
+                gimbal.resume()
+            time.sleep(0.05)
+        else:
             loop_start = time.perf_counter()
             ret, frame=cap.read()
             if not ret:
@@ -297,6 +322,9 @@ def main():
                     last_read_warn = time.time()
                 time.sleep(0.2)
                 continue
+            # where the camera pointed for this frame; it keeps moving during inference
+            if gimbal is not None:
+                cap_pan, cap_tilt = gimbal.angles()
             if simulated:
                 # Crop the frame to what the virtual pan/tilt camera would see
                 frame = io.view(frame)
@@ -325,7 +353,11 @@ def main():
                                22 if tracking_body else 12, 3 if tracking_body else 1)
                 if head is not None:
                     cv2.circle(frame, head, 4 if tracking_body else 7, (0, 0, 255), -1)
-                center(target, frame.shape[:2])
+                if gimbal is not None:
+                    gimbal.set_target(*aim(target, frame.shape[:2], cap_pan, cap_tilt, args.hfov,
+                                           gain=args.track_gain, deadband=args.deadband))
+                else:
+                    center(target, frame.shape[:2])
 
             if not rectangle:
                 target = target_src = body = None
@@ -344,6 +376,9 @@ def main():
                                  if rectangle else None,
                     "pan": io.get_base_angle(),
                     "tilt": io.get_camera_angle(),
+                    "tracker": args.tracker,
+                    "target_pan": gimbal.targets()[0] if gimbal is not None else None,
+                    "target_tilt": gimbal.targets()[1] if gimbal is not None else None,
                 }))
 
             show_window = not args.headless
@@ -373,6 +408,8 @@ def main():
     if stream is not None:
         print("[INFO] Stopping stream server...")
         stop_stream_server(stream)
+    if gimbal is not None:
+        gimbal.stop()
     io.center()
     # Cleanup resources
     print("[INFO] Releasing camera...")

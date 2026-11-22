@@ -126,8 +126,9 @@ class MjpegCamera:
     """
     cv2.VideoCapture-like reader for an MJPEG HTTP stream.
 
-    A background thread keeps only the newest decoded frame, so a slow
-    consumer never builds up latency. Reconnects automatically if the
+    A background thread keeps only the newest JPEG, so a slow consumer never
+    builds up latency. Frames are decoded in read(), so frames the consumer
+    skips cost no decode CPU (matters at ~2 fps inference on the Pi). Reconnects automatically if the
     stream drops (e.g. the camera device reboots).
     """
 
@@ -136,7 +137,7 @@ class MjpegCamera:
         self.retry_s = retry_s
         self.connect_timeout = connect_timeout
         self._cond = threading.Condition()
-        self._frame = None
+        self._jpg = None
         self._frame_id = 0
         self._last_read_id = 0
         self._running = True
@@ -155,11 +156,8 @@ class MjpegCamera:
                 for jpg in iter_mjpeg(self._response):
                     if not self._running:
                         break
-                    frame = cv2.imdecode(np.frombuffer(jpg, np.uint8), cv2.IMREAD_COLOR)
-                    if frame is None:
-                        continue
                     with self._cond:
-                        self._frame = frame
+                        self._jpg = jpg
                         self._frame_id += 1
                         self._cond.notify_all()
                 if self._running:
@@ -191,7 +189,12 @@ class MjpegCamera:
             if self._frame_id == self._last_read_id:
                 return False, None
             self._last_read_id = self._frame_id
-            return True, self._frame
+            jpg = self._jpg
+        # decode outside the lock so the reader thread is never blocked on it
+        frame = cv2.imdecode(np.frombuffer(jpg, np.uint8), cv2.IMREAD_COLOR)
+        if frame is None:
+            return False, None
+        return True, frame
 
     def release(self):
         self._running = False

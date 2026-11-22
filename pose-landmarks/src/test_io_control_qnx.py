@@ -111,3 +111,11 @@ def test_release_zeroes_duty_and_center_restores(qnx):
     assert all(p.duty == 0 for p in gpio.pwms.values())
     io.center()
     assert all(p.duty == pytest.approx(7.5) for p in gpio.pwms.values())
+
+
+def test_move_to_sets_angles_and_clamps(qnx):
+    mod, gpio = qnx
+    io = mod.IoControl()
+    io.move_to(999, 0)
+    assert io.get_base_angle() == io.PAN_MAX and io.get_camera_angle() == io.PITCH_MIN
+    assert gpio.pwms[io.base_pin].duty == pytest.approx(12.5)

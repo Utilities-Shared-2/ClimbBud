@@ -114,6 +114,13 @@ class IoControl:
             self.set_servo_pulsewidth(self.camera_pin, self.degrees_to_pulsewidth(self.camera_angle))
         return
 
+    def move_to(self, pan, tilt):
+        """Drive both servos to absolute angles (clamped). Used by gimbal.SmoothGimbal."""
+        self.base_angle = max(self.PAN_MIN, min(self.PAN_MAX, pan))
+        self.camera_angle = max(self.PITCH_MIN, min(self.PITCH_MAX, tilt))
+        self.set_servo_pulsewidth(self.base_pin, self.degrees_to_pulsewidth(self.base_angle))
+        self.set_servo_pulsewidth(self.camera_pin, self.degrees_to_pulsewidth(self.camera_angle))
+
     def get_base_angle(self):
         return self.base_angle
 

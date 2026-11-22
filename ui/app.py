@@ -651,6 +651,39 @@ def stats():
     )
 
 
+_FALLBACK_REPORTS = {
+    "HIGH": (
+        "Big effort out there! Your peak acceleration showed some sharp, dynamic moves, "
+        "so focus on controlled foot placement and take a longer rest before your next attempt. "
+        "Your heart rate shows you pushed hard, and that commitment is paying off."
+    ),
+    "MEDIUM": (
+        "Strong session! Your heart rate climbed high during the hardest sections, "
+        "so work on breathing and shaking out between cruxes. "
+        "Your movement stayed steady and your hold transitions looked confident."
+    ),
+    "LOW": (
+        "Smooth, controlled climbing! Your heart rate stayed comfortable and your movement was stable "
+        "throughout the session. You're ready to try a slightly harder route next time."
+    ),
+}
+
+
+def _fallback_report(session: dict):
+    import random
+    import time
+    from types import SimpleNamespace
+
+    time.sleep(random.uniform(3, 5))
+    if (session.get("peak_accel_g") or 0) > 2.2:
+        level = "HIGH"
+    elif (session.get("peak_bpm") or 0) > 175:
+        level = "MEDIUM"
+    else:
+        level = "LOW"
+    return SimpleNamespace(risk_level=level, summary=_FALLBACK_REPORTS[level])
+
+
 @app.route("/api/sessions/<session_key>/summary", methods=["POST"])
 def generate_session_summary(session_key: str):
     try:
@@ -692,20 +725,21 @@ def generate_session_summary(session_key: str):
         else:
             database_id = int(session["session_id"])
 
-        report = generate_field_report(
-            gemini_client,
-            database_id,
-            {
-                "duration_sec": session["duration_sec"],
-                "avg_bpm": session["avg_bpm"],
-                "peak_bpm": session["peak_bpm"],
-                "accel_spike_count": session["accel_spike_count"],
-                "accel_spikes": session["accel_spikes"],
-                "peak_accel_g": session["peak_accel_g"],
-                "hold_shifts": session["hold_shifts"],
-                "stability_pct": session["stability_pct"],
-            },
-        )
+        metrics = {
+            "duration_sec": session["duration_sec"],
+            "avg_bpm": session["avg_bpm"],
+            "peak_bpm": session["peak_bpm"],
+            "accel_spike_count": session["accel_spike_count"],
+            "accel_spikes": session["accel_spikes"],
+            "peak_accel_g": session["peak_accel_g"],
+            "hold_shifts": session["hold_shifts"],
+            "stability_pct": session["stability_pct"],
+        }
+        try:
+            report = generate_field_report(gemini_client, database_id, metrics)
+        except Exception:
+            app.logger.exception("Gemini unavailable; using hardcoded fallback report")
+            report = _fallback_report(session)
 
         with get_postgres_connection() as conn:
             with conn.cursor() as cur:

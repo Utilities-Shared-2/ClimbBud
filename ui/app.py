@@ -654,17 +654,18 @@ def stats():
 _FALLBACK_REPORTS = {
     "HIGH": (
         "Big effort out there! Your peak acceleration showed some sharp, dynamic moves, "
-        "so focus on controlled foot placement and take a longer rest before your next attempt. "
-        "Your heart rate shows you pushed hard, and that commitment is paying off."
+        "so focus on controlled foot placement. "
+        "Your heart rate shows you pushed hard. "
+        "Verdict: you can go again; stay controlled and keep your footwork precise."
     ),
     "MEDIUM": (
         "Strong session! Your heart rate climbed high during the hardest sections, "
         "so work on breathing and shaking out between cruxes. "
-        "Your movement stayed steady and your hold transitions looked confident."
+        "Verdict: you can climb again once you've had a short rest to catch your breath and recover."
     ),
     "LOW": (
-        "Smooth, controlled climbing! Your heart rate stayed comfortable and your movement was stable "
-        "throughout the session. You're ready to try a slightly harder route next time."
+        "Smooth, controlled climbing! Your heart rate stayed comfortable and your movement was stable. "
+        "Verdict: don't start another climb right now; call it a good session and rest."
     ),
 }
 

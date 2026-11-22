@@ -183,8 +183,11 @@ def main():
                         help='Servo backend: qnx (rpi_gpio on QNX), pigpio (Raspberry Pi OS) or mock. '
                              'auto = qnx on QNX, else pigpio, falling back to mock')
     parser.add_argument('--mock', action='store_true', help='Shortcut for --io mock (simulated servos)')
-    parser.add_argument('--camera-backend', choices=['auto', 'qnx', 'opencv'], default='auto',
-                        help='auto = qnx_apis (libcamapi) on QNX, cv2.VideoCapture elsewhere')
+    parser.add_argument('--camera-url', default=None,
+                        help='Pull frames from an MJPEG stream instead of a local webcam, e.g. '
+                             'http://camera-pi.local:8081/stream (served by camera_streamer.py). Required on QNX')
+    parser.add_argument('--camera-backend', choices=['auto', 'opencv', 'mjpeg'], default='auto',
+                        help='auto = mjpeg when --camera-url is given, else the local webcam (cv2.VideoCapture)')
     parser.add_argument('--inference', choices=['auto', 'openvino', 'opencv'], default='auto',
                         help='Pose model runtime; auto = OpenVINO if installed (not on QNX), else OpenCV DNN')
     parser.add_argument('--display-scale', type=float, default=2.0,
@@ -217,7 +220,7 @@ def main():
     simulated = hasattr(io, "view")
     max_fps = args.max_fps if args.max_fps else (8.0 if simulated else None)
 
-    cap = open_camera(args.camera, args.camera_backend)
+    cap = open_camera(args.camera, args.camera_backend, url=args.camera_url)
     if not cap.isOpened():
         print(f"[ERROR] Could not open camera {args.camera}")
         return
@@ -236,6 +239,7 @@ def main():
     
     n_frames = 0
     fps_cum = 0.0
+    last_read_warn = 0.0
     # fps_avg = 0.0
 
     while running:
@@ -244,7 +248,10 @@ def main():
             loop_start = time.perf_counter()
             ret, frame=cap.read()
             if not ret:
-                print("[WARN] camera read failed, retrying")
+                # MjpegCamera already logs disconnects; only nag every 5s here
+                if time.time() - last_read_warn > 5:
+                    print("[WARN] no camera frame, retrying")
+                    last_read_warn = time.time()
                 time.sleep(0.2)
                 continue
             if simulated:

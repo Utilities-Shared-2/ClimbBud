@@ -1,0 +1,3 @@
+# Camera Pi (Raspberry Pi OS): only capture + JPEG encoding. pip install -r requirements-camera.txt
+numpy
+opencv-python-headless

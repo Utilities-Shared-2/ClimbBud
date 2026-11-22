@@ -82,16 +82,18 @@ class PIDController:
         output = (self.kp * normalized_error) + (self.ki * self._integral) + (self.kd * derivative)
         print(f"output:{output}")
         output = output*self.output_limits
-        self._prev_error = normalized_error
+        if output > 0.099:
+            #clamps the movement limit to roughly > 0.1
+            self._prev_error = normalized_error
+            output = 0
         self._last_time = current_time
-
         return output
 
 # Initialize PID controllers for pan (x-axis) and tilt (y-axis)
 # kp: proportional gain, ki: integral gain, kd: derivative gain
 # These values may need tuning based on your specific servo characteristics
-pan_pid = PIDController(kp=0.7, ki=0, kd=0.2, output_limits=15)
-tilt_pid = PIDController(kp=0.5, ki=0, kd=0.4, output_limits=5)
+pan_pid = PIDController(kp=0.4, ki=0, kd=0.2, output_limits=15)
+tilt_pid = PIDController(kp=0.2, ki=0, kd=0.4, output_limits=5)
 
 def pick_target(person_kpts, box, kpt_thr, frame_shape):
     """

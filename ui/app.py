@@ -1,10 +1,9 @@
-"""ClimbBot – Flask GUI.
+"""ClimbBud Flask dashboard.
 
 Run:  pip install flask
       python app.py   ->  http://localhost:5000
 
-All sensor values are simulated in `read_sensors()`. Replace that one
-function with your real heart-rate / camera / pose-tracking code.
+Live heart-rate and movement readings come from the telemetry database.
 """
 import atexit
 import math
@@ -140,14 +139,11 @@ HISTORY = [
 ]
 
 
-def read_sensors():
-    """Swap this for real data."""
+def read_elapsed():
     t = state["elapsed"]
     if state["recording"]:
         t += time.time() - state["start"]
-    bpm = int(132 + 12 * math.sin(t / 4) + random.randint(-2, 2))
-    intensity = round(0.5 + 0.35 * math.sin(t / 2.2) + 0.1 * math.sin(t * 1.3), 3)
-    return {"bpm": bpm, "intensity": intensity, "elapsed": t}
+    return t
 
 
 @app.route("/")
@@ -157,12 +153,32 @@ def index():
 
 @app.route("/api/live")
 def live():
-    data = read_sensors()
-    return jsonify(**data, pr=state["pr"], battery=state["battery"],
-                   recording=state["recording"], stream_connected=state["stream_connected"])
+    try:
+        from telemetry.db import load_live_telemetry
+    except ImportError as exc:
+        app.logger.exception("Telemetry database dependencies are unavailable")
+        return jsonify(error=f"Telemetry database dependencies are unavailable: {exc}"), 503
 
+    try:
+        data = load_live_telemetry()
+    except Exception:
+        app.logger.exception("Unable to load live telemetry from the database")
+        return jsonify(error="Live telemetry is unavailable."), 503
 
-@app.route("/video/stream")
+    latest = data["latest"]
+    return jsonify(
+        bpm=latest["bpm"] if latest else None,
+        intensity=latest["speed"] if latest else None,
+        elapsed=read_elapsed(),
+        pr=state["pr"],
+        battery=state["battery"],
+        recording=state["recording"],
+        session=data["session"],
+        latest=latest,
+        history=data["history"],
+    )
+
+app.route("/video/stream")
 def video_stream():
     """Proxy the MJPEG stream from the pose server if available."""
     if not state["stream_connected"]:
@@ -199,7 +215,7 @@ def toggle():
         state["recording"] = True
     
     state["start"] = now
-    return jsonify(recording=state["recording"], elapsed=read_sensors()["elapsed"])
+    return jsonify(recording=state["recording"], elapsed=read_elapsed())
 
 
 @app.route("/api/stats")

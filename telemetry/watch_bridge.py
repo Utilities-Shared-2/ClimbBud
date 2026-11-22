@@ -1,6 +1,5 @@
 import asyncio
 import json
-import math
 import os
 import struct
 import time
@@ -25,7 +24,6 @@ OFFLINE_TEST = os.getenv("OFFLINE_TEST", "1") == "1"
 
 latest_telemetry = {
     "bpm": 0,
-    "accel_g": 1.0,
     "xyz": [0, 0, 0],
 }
 
@@ -44,9 +42,7 @@ def handle_motion(_sender, data: bytearray) -> None:
     # InfiniTime broadcasts 3 signed 16-bit integers (X, Y, Z), where ~1024 = 1g
     if len(data) >= 6:
         x, y, z = struct.unpack("<3h", data[:6])
-        accel_g = math.sqrt(x * x + y * y + z * z) / 1024.0
         latest_telemetry["xyz"] = [x, y, z]
-        latest_telemetry["accel_g"] = round(accel_g, 3)
 
 
 def create_mqtt_client() -> mqtt.Client | None:
@@ -91,7 +87,6 @@ async def stream_from_watch(mqtt_client: mqtt.Client | None) -> None:
                         "ts": round(time.time(), 3),
                         "source": "watch",
                         "bpm": latest_telemetry["bpm"],
-                        "accel_g": latest_telemetry["accel_g"],
                         "xyz": latest_telemetry["xyz"],
                     }
                     msg = json.dumps(payload)

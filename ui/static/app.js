@@ -59,7 +59,7 @@ async function fetchLive() {
     if (!response.ok) throw new Error(`Live API returned ${response.status}`);
     const data = await response.json();
 
-    document.getElementById("bpm").textContent = data.bpm;
+    document.getElementById("bpm").textContent = data.bpm ?? "--";
     document.getElementById("pr").textContent = data.pr;
     document.getElementById("battText").textContent = `${data.battery}%`;
     document.getElementById("battFill").setAttribute("width", String(18 * data.battery / 100));
@@ -71,9 +71,9 @@ async function fetchLive() {
     document.getElementById("recBtn").classList.toggle("off", !recording);
 
     // Handle video stream connection status
-    updateVideoState(data.stream_connected);
 
-    if (recording) {
+      updateVideoState(data.stream_connected);
+    if (recording && Number.isFinite(data.intensity)) {
       intensityHistory.push(Math.max(0, Math.min(1, data.intensity)));
       if (intensityHistory.length > 50) intensityHistory.shift();
       renderChart();

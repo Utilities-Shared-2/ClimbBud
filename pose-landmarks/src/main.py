@@ -3,6 +3,7 @@ import time
 import signal
 import argparse
 import os
+import threading
 
 
 from recognition import PoseDetector
@@ -14,6 +15,23 @@ from stream_server import FrameBroadcaster, start_stream_server, stop_stream_ser
 io = None
 running = True
 args = None
+# Set = model + servos active. Flipped by the /toggle HTTP route; the main loop
+# reacts to changes so all GPIO calls stay on the main thread.
+tracking_enabled = threading.Event()
+tracking_enabled.set()
+_toggle_lock = threading.Lock()
+
+
+def toggle_tracking(state=None):
+    """Set tracking on (True), off (False) or flip it (None). Returns the new state."""
+    with _toggle_lock:
+        if state is None:
+            state = not tracking_enabled.is_set()
+        if state:
+            tracking_enabled.set()
+        else:
+            tracking_enabled.clear()
+        return state
 FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "model", "public",
                     "yolov11n", "yolo11n-pose.onnx")
 
@@ -231,7 +249,8 @@ def main():
     broadcaster = stream = None
     if args.stream:
         broadcaster = FrameBroadcaster(quality=args.stream_quality)
-        stream = start_stream_server(broadcaster, args.stream_host, args.stream_port)
+        stream = start_stream_server(broadcaster, args.stream_host, args.stream_port,
+                                     on_toggle=toggle_tracking)
 
     if not args.headless:
         # WINDOW_NORMAL lets you drag-resize the preview as well
@@ -240,9 +259,33 @@ def main():
     n_frames = 0
     fps_cum = 0.0
     last_read_warn = 0.0
+    was_enabled = True
     # fps_avg = 0.0
 
     while running:
+        enabled = tracking_enabled.is_set()
+        if enabled != was_enabled:
+            was_enabled = enabled
+            if enabled:
+                io.center()
+                pan_pid.reset()
+                tilt_pid.reset()
+                print("[INFO] tracking resumed")
+            else:
+                io.release()
+                print("[INFO] tracking paused (model + servos off)")
+                if broadcaster is not None:
+                    broadcaster.publish_data({"timestamp": time.time(), "enabled": False,
+                                              "detected": False})
+        if not enabled:
+            if not args.headless:
+                k = cv2.waitKey(50) & 0xFF
+                if k == 27 or k == ord('q'):
+                    break
+            else:
+                time.sleep(0.05)
+            continue
+
         io.read_switch()
         if not io.resetToggled:
             loop_start = time.perf_counter()
@@ -290,6 +333,7 @@ def main():
             if broadcaster is not None:
                 broadcaster.publish_data(to_jsonable({
                     "timestamp": time.time(),
+                    "enabled": True,
                     "fps": fps_avg,
                     "frame_shape": frame.shape[:2],
                     "detected": bool(rectangle),

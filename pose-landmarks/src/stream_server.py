@@ -10,11 +10,14 @@ Routes:
     /snapshot.jpg  latest frame as a single JPEG
     /pose          latest pose / body / servo data as JSON
     /health        {"status": "ok"}
+    /toggle        GET/POST: flip tracking (model + servo GPIO) on/off -> {"enabled": bool}
+                   ?state=on|off sets it explicitly instead of flipping
 """
 import json
 import socket
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs
 
 import cv2
 
@@ -85,8 +88,14 @@ INDEX_HTML = """<!doctype html>
 </style></head>
 <body>
 <img src="/stream" alt="live stream">
+<div style="padding:12px"><button id="toggle" onclick="toggle()">Toggle tracking</button> <span id="state"></span></div>
 <pre id="pose">waiting for data...</pre>
 <script>
+async function toggle(){
+  try{const r=await fetch('/toggle',{method:'POST'});const d=await r.json();
+      document.getElementById('state').textContent=d.enabled?'tracking ON':'tracking OFF';}
+  catch(e){document.getElementById('state').textContent='toggle failed';}
+}
 async function poll(){
   try{const r=await fetch('/pose');document.getElementById('pose').textContent=JSON.stringify(await r.json(),null,1);}
   catch(e){}
@@ -98,7 +107,7 @@ poll();
 """
 
 
-def _make_handler(broadcaster):
+def _make_handler(broadcaster, on_toggle=None):
     class StreamHandler(BaseHTTPRequestHandler):
         def log_message(self, fmt, *args):  # keep the tracker console quiet
             pass
@@ -113,9 +122,39 @@ def _make_handler(broadcaster):
             self.wfile.write(body)
 
         def do_GET(self):
-            path = self.path.split("?", 1)[0]
+            self._route()
+
+        def do_POST(self):
+            length = int(self.headers.get("Content-Length") or 0)
+            if length:
+                self.rfile.read(length)  # drain any body; it is ignored
+            self._route()
+
+        def _toggle(self, query):
+            if on_toggle is None:
+                self._send(404, b"not found", "text/plain")
+                return
+            raw = (parse_qs(query).get("state") or [""])[0].lower()
+            if raw in ("on", "1", "true"):
+                state = True
+            elif raw in ("off", "0", "false"):
+                state = False
+            elif raw == "":
+                state = None  # flip
+            else:
+                self._send(400, b'{"error": "state must be on or off"}', "application/json")
+                return
+            enabled = on_toggle(state)
+            self._send(200, json.dumps({"enabled": bool(enabled)}).encode(), "application/json")
+
+        def _route(self):
+            path, _, query = self.path.partition("?")
             try:
-                if path in ("/", "/index.html"):
+                if path == "/toggle":
+                    self._toggle(query)
+                elif self.command != "GET":
+                    self._send(405, b"method not allowed", "text/plain")
+                elif path in ("/", "/index.html"):
                     self._send(200, INDEX_HTML.encode(), "text/html; charset=utf-8")
                 elif path == "/stream":
                     self._stream()
@@ -181,14 +220,19 @@ def _lan_ip():
         s.close()
 
 
-def start_stream_server(broadcaster, host="0.0.0.0", port=8080):
-    """Start the HTTP server on a daemon thread. Call stop_stream_server() on exit."""
-    server = ThreadingHTTPServer((host, port), _make_handler(broadcaster))
+def start_stream_server(broadcaster, host="0.0.0.0", port=8080, on_toggle=None):
+    """Start the HTTP server on a daemon thread. Call stop_stream_server() on exit.
+
+    on_toggle(state) is called by /toggle with True/False (explicit) or None (flip)
+    and must return the new enabled bool.
+    """
+    server = ThreadingHTTPServer((host, port), _make_handler(broadcaster, on_toggle))
     server.daemon_threads = True
     server.stopping = False
     threading.Thread(target=server.serve_forever, name="stream-server", daemon=True).start()
     shown = _lan_ip() if host in ("0.0.0.0", "") else host
-    print(f"[INFO] Streaming at http://{shown}:{port}/  (raw MJPEG: /stream, data: /pose)")
+    print(f"[INFO] Streaming at http://{shown}:{port}/  (raw MJPEG: /stream, data: /pose"
+          + (", on/off: /toggle" if on_toggle else "") + ")")
     return server
 
 

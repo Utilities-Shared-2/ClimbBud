@@ -132,6 +132,11 @@ class IoControl:
             print("--- Limit Switch Released! ---")
             self.resetToggled = False
 
+    def release(self):
+        """Stop the servo pulses (servos go limp). Reversible, unlike stop_all()."""
+        self.pi.set_servo_pulsewidth(self.base_pin, 0)
+        self.pi.set_servo_pulsewidth(self.camera_pin, 0)
+
     def stop_all(self):
         self.pi.set_servo_pulsewidth(self.base_pin, 0)
         self.pi.set_servo_pulsewidth(self.camera_pin, 0)

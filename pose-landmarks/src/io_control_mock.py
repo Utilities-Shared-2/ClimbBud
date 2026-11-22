@@ -80,6 +80,9 @@ class IoControl:
     def read_switch(self):
         return 1  # switch never pressed
 
+    def release(self):
+        self._log("[MOCK] servos released")
+
     def stop_all(self):
         self._log(f"[MOCK] stop_all (final pan={self.base_angle:.1f}, tilt={self.camera_angle:.1f})")
 

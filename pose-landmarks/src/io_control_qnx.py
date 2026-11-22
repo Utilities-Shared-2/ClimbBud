@@ -38,6 +38,10 @@ class IoControl:
     PAN_MIN = PAN_MIN
     PAN_MAX = PAN_MAX
 
+    # GPIO pin numbers (BOARD → BCM conversion if needed)
+    # BOARD 11 → BCM 17
+    # BOARD 13 → BCM 27
+    # BOARD 37 → BCM 26
     def __init__(self, base_pin=17, camera_pin=27, switch_pin=26):
         self.base_pin = base_pin
         self.camera_pin = camera_pin
@@ -120,6 +124,10 @@ class IoControl:
         self._apply()
         time.sleep(1)
 
-    def stop_all(self):
+    def release(self):
+        """Stop the servo pulses (servos go limp). Reversible: center() drives them again."""
         for pin in self._pwm:
             self.set_servo_pulsewidth(pin, 0)
+
+    def stop_all(self):
+        self.release()

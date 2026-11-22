@@ -102,3 +102,12 @@ def test_stop_all_zeroes_duty(qnx):
     io = mod.IoControl()
     io.stop_all()
     assert all(p.duty == 0 for p in gpio.pwms.values())
+
+
+def test_release_zeroes_duty_and_center_restores(qnx):
+    mod, gpio = qnx
+    io = mod.IoControl()
+    io.release()
+    assert all(p.duty == 0 for p in gpio.pwms.values())
+    io.center()
+    assert all(p.duty == pytest.approx(7.5) for p in gpio.pwms.values())

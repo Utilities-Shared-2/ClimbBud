@@ -30,6 +30,9 @@ telemetry/.env before starting the dashboard (environment takes precedence):
   MQTT_BROKER_IP / _PORT         Broker carrying climbbud/control/session. START/STOP
                                  there (voice Pi, dashboard button) starts/stops the
                                  health-stats session and the video recording.
+  RECORDING_API_TOKEN            Optional shared secret for POST /api/recording/start
+                                 and /stop (used by the voice Pi). When set, callers
+                                 must send it in the X-ClimbBud-Token header.
   UI_TELEMETRY_WORKER            Run the telemetry DB worker inside the dashboard
                                  (default 1). Set 0 when telemetry/db.py runs as its
                                  own process on the same broker, or every START
@@ -46,6 +49,7 @@ memory. A telemetry error returns HTTP 503 with both error and fall fields.
 Detection is experimental and must not be relied on as a safety system.
 """
 import atexit
+import hmac
 import json
 import math
 import os
@@ -61,7 +65,7 @@ from urllib.request import urlopen
 
 import requests
 from dotenv import load_dotenv
-from flask import Flask, jsonify, render_template, Response, stream_with_context
+from flask import Flask, jsonify, render_template, request, Response, stream_with_context
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -572,19 +576,48 @@ def simulate_fall():
     return jsonify(fall=fall_monitor.state())
 
 
-@app.route("/api/recording/toggle", methods=["POST"])
-def toggle():
-    """Start/stop recording right now: timer, video + pose recorder and health-stats session."""
-    on = not state["recording"]
+def _apply_recording(on):
+    """Start/stop recording right now: timer, video + pose recorder and health-stats session.
+    Shared by the dashboard button and the voice Pi's HTTP calls."""
     # In-process telemetry: drive its DB session directly (publishing would make the
     # in-process worker start a second session).
-    set_recording(on, drive_db=True)
-    if telemetry_db is None:
+    changed = set_recording(on, drive_db=True)
+    if changed and telemetry_db is None:
         # Telemetry runs elsewhere (or isn't available): tell it over MQTT. Our own
         # subscription receives the echo, which is a no-op because set_recording is idempotent.
         publish_session_command("START" if on else "STOP")
-    return jsonify(recording=state["recording"], elapsed=read_elapsed(),
+    return jsonify(recording=state["recording"], changed=changed, elapsed=read_elapsed(),
                    video_recording=session_recorder.status())
+
+
+def _recording_api_authorized():
+    """If RECORDING_API_TOKEN is set, remote start/stop calls must send it in X-ClimbBud-Token."""
+    token = os.getenv("RECORDING_API_TOKEN", "").strip()
+    if not token:
+        return True
+    return hmac.compare_digest(request.headers.get("X-ClimbBud-Token", ""), token)
+
+
+@app.route("/api/recording/toggle", methods=["POST"])
+def toggle():
+    """Dashboard button: flip recording."""
+    return _apply_recording(not state["recording"])
+
+
+@app.route("/api/recording/start", methods=["POST"])
+def recording_start():
+    """Remote start (voice Pi). Idempotent: starting while recording returns changed=false."""
+    if not _recording_api_authorized():
+        return jsonify(error="Invalid or missing X-ClimbBud-Token."), 401
+    return _apply_recording(True)
+
+
+@app.route("/api/recording/stop", methods=["POST"])
+def recording_stop():
+    """Remote stop (voice Pi). Idempotent."""
+    if not _recording_api_authorized():
+        return jsonify(error="Invalid or missing X-ClimbBud-Token."), 401
+    return _apply_recording(False)
 
 
 @app.route("/api/stats")

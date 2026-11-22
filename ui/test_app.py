@@ -351,6 +351,37 @@ class SessionControlTests(unittest.TestCase):
         self.assertEqual(self.recorder.stop.call_count, 1)
         self.assertEqual(self.recorder.start.call_count, 2)
 
+    def test_remote_start_and_stop_are_idempotent(self):
+        db = Mock()
+        with patch("ui.app.telemetry_db", db), patch("ui.app.threading.Thread"), \
+                patch.dict("os.environ", {"RECORDING_API_TOKEN": ""}):
+            first = self.client.post("/api/recording/start").get_json()
+            second = self.client.post("/api/recording/start").get_json()
+            self.assertEqual((first["recording"], first["changed"]), (True, True))
+            self.assertEqual((second["recording"], second["changed"]), (True, False))
+            self.recorder.start.assert_called_once()
+            db.start_session.assert_called_once()
+            stopped = self.client.post("/api/recording/stop").get_json()
+            again = self.client.post("/api/recording/stop").get_json()
+        self.assertEqual((stopped["recording"], stopped["changed"]), (False, True))
+        self.assertFalse(again["changed"])
+        self.recorder.stop.assert_called_once()
+        db.stop_session.assert_called_once()
+
+    def test_remote_calls_require_token_when_configured(self):
+        with patch("ui.app.telemetry_db", None), patch("ui.app.control_client", None), \
+                patch("ui.app.threading.Thread"), patch.dict("os.environ", {"RECORDING_API_TOKEN": "s3cret"}):
+            self.assertEqual(self.client.post("/api/recording/start").status_code, 401)
+            wrong = self.client.post("/api/recording/start", headers={"X-ClimbBud-Token": "nope"})
+            self.assertEqual(wrong.status_code, 401)
+            self.recorder.start.assert_not_called()
+            right = self.client.post("/api/recording/start", headers={"X-ClimbBud-Token": "s3cret"})
+            self.assertEqual(right.status_code, 200)
+            self.recorder.start.assert_called_once()
+            # the browser button isn't affected by the token
+            self.assertEqual(self.client.post("/api/recording/toggle").status_code, 200)
+        self.assertFalse(state["recording"])
+
     def test_repeated_commands_are_ignored(self):
         from ui.app import on_session_command
         with patch("ui.app.threading.Thread"):

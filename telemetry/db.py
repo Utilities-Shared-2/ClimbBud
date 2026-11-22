@@ -272,6 +272,10 @@ class TelemetryDatabase:
         print(f"[SESSION] Stopped session #{sid} at {ended_at.isoformat()}")
 
     def enqueue_telemetry(self, payload: dict[str, Any], default_source: str) -> None:
+        # Only log telemetry if there's an active session
+        if self.active_session_id is None:
+            return
+
         ts_raw = payload.get("ts")
         if isinstance(ts_raw, (int, float)):
             dt = datetime.fromtimestamp(float(ts_raw), tz=timezone.utc)

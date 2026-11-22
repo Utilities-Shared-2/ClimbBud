@@ -6,27 +6,92 @@ Run:  pip install flask
 All sensor values are simulated in `read_sensors()`. Replace that one
 function with your real heart-rate / camera / pose-tracking code.
 """
+import atexit
 import math
+import os
 import random
 import sys
+import threading
 import time
 from pathlib import Path
 
+from dotenv import load_dotenv
 from flask import Flask, jsonify, render_template
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+# Load environment variables from telemetry/.env
+load_dotenv(REPO_ROOT / "telemetry" / ".env")
+
 app = Flask(__name__)
 
 state = {
-    "recording": True,
+    "recording": False,
     "start": time.time(),
     "elapsed": 0.0,
     "pr": 12.4,          # personal-record time, seconds
     "battery": 87,
 }
+
+# Initialize telemetry database on startup
+telemetry_db = None
+mqtt_client = None
+
+def cleanup_telemetry():
+    """Cleanup telemetry resources on shutdown."""
+    global mqtt_client, telemetry_db
+    if mqtt_client:
+        try:
+            mqtt_client.loop_stop()
+            mqtt_client.disconnect()
+            print("[UI] MQTT client disconnected")
+        except Exception as exc:
+            print(f"[UI] Error disconnecting MQTT: {exc}")
+    if telemetry_db:
+        try:
+            telemetry_db.flush()
+            if telemetry_db.pg_conn:
+                telemetry_db.pg_conn.close()
+            print("[UI] Telemetry database flushed and closed")
+        except Exception as exc:
+            print(f"[UI] Error closing telemetry: {exc}")
+
+def init_telemetry():
+    """Initialize telemetry database and MQTT worker in background thread."""
+    global telemetry_db, mqtt_client
+    try:
+        from telemetry.db import TelemetryDatabase, create_mqtt_worker, FLUSH_INTERVAL_SEC, SQLITE_DB_PATH
+
+        telemetry_db = TelemetryDatabase(
+            pg_url=os.getenv("TIGER_DATA_URL"),
+            sqlite_path=SQLITE_DB_PATH
+        )
+        mqtt_client = create_mqtt_worker(telemetry_db)
+        mqtt_client.loop_start()
+
+        # Background flush thread
+        def flush_loop():
+            while True:
+                time.sleep(FLUSH_INTERVAL_SEC)
+                if telemetry_db:
+                    telemetry_db.flush()
+
+        flush_thread = threading.Thread(target=flush_loop, daemon=True)
+        flush_thread.start()
+        print("[UI] Telemetry database and MQTT worker initialized")
+    except ImportError as exc:
+        print(f"[UI] Telemetry dependencies unavailable: {exc}")
+    except Exception as exc:
+        print(f"[UI] Failed to initialize telemetry: {exc}")
+
+# Register cleanup handler
+atexit.register(cleanup_telemetry)
+
+# Start telemetry in background
+init_thread = threading.Thread(target=init_telemetry, daemon=True)
+init_thread.start()
 
 # Normalised (0-1) hold positions of the detected route, bottom -> top.
 ROUTE = [(0.38, 0.95), (0.52, 0.80), (0.70, 0.65), (0.62, 0.52),
@@ -64,10 +129,21 @@ def live():
 
 @app.route("/api/recording/toggle", methods=["POST"])
 def toggle():
+    global telemetry_db
     now = time.time()
+    
     if state["recording"]:
+        # Stop recording
         state["elapsed"] += now - state["start"]
-    state["recording"] = not state["recording"]
+        if telemetry_db:
+            telemetry_db.stop_session()
+        state["recording"] = False
+    else:
+        # Start recording
+        if telemetry_db:
+            telemetry_db.start_session()
+        state["recording"] = True
+    
     state["start"] = now
     return jsonify(recording=state["recording"], elapsed=read_sensors()["elapsed"])
 

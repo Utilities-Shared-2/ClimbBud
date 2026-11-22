@@ -110,6 +110,7 @@ def end_session() -> None:
 
 def start_recording() -> None:
     global is_currently_recording, current_file
+    print("Recording Started")
     if not is_currently_recording and IsVoiceRecorded:
         import soundfile as sf
 
@@ -128,6 +129,7 @@ def start_recording() -> None:
 
 def end_recording() -> None:
     global is_currently_recording, current_file
+    print("Recording Ended")
     if is_currently_recording:
         is_currently_recording = False
         if current_file is not None:

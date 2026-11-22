@@ -38,7 +38,7 @@ class IoControl:
     PAN_MIN = PAN_MIN
     PAN_MAX = PAN_MAX
 
-    def __init__(self, base_pin=12, camera_pin=13, switch_pin=26):
+    def __init__(self, base_pin=17, camera_pin=27, switch_pin=26):
         self.base_pin = base_pin
         self.camera_pin = camera_pin
         self.switch_pin = switch_pin

@@ -1,0 +1,1601 @@
+Sun Nov 22 06:13:28 UTC 2026 starting
+  File "/data/home/qnxuser/ClimbBud/pose-landmarks/start.sh", line 4
+    cd "$(dirname "$0")"
+       ^^^^^^^^^^^^
+SyntaxError: invalid syntax
+Sun Nov 22 06:13:29 UTC 2026 exited with 1, restarting in 5s
+Sun Nov 22 06:13:34 UTC 2026 starting
+  File "/data/home/qnxuser/ClimbBud/pose-landmarks/start.sh", line 4
+    cd "$(dirname "$0")"
+       ^^^^^^^^^^^^
+SyntaxError: invalid syntax
+Sun Nov 22 06:13:34 UTC 2026 exited with 1, restarting in 5s
+Sun Nov 22 06:13:39 UTC 2026 starting
+  File "/data/home/qnxuser/ClimbBud/pose-landmarks/start.sh", line 4
+    cd "$(dirname "$0")"
+       ^^^^^^^^^^^^
+SyntaxError: invalid syntax
+Sun Nov 22 06:13:39 UTC 2026 exited with 1, restarting in 5s
+Sun Nov 22 06:13:44 UTC 2026 starting
+  File "/data/home/qnxuser/ClimbBud/pose-landmarks/start.sh", line 4
+    cd "$(dirname "$0")"
+       ^^^^^^^^^^^^
+SyntaxError: invalid syntax
+Sun Nov 22 06:13:44 UTC 2026 exited with 1, restarting in 5s
+Sun Nov 22 06:13:49 UTC 2026 starting
+  File "/data/home/qnxuser/ClimbBud/pose-landmarks/start.sh", line 4
+    cd "$(dirname "$0")"
+       ^^^^^^^^^^^^
+SyntaxError: invalid syntax
+Sun Nov 22 06:13:49 UTC 2026 exited with 1, restarting in 5s
+Sun Nov 22 06:13:54 UTC 2026 starting
+  File "/data/home/qnxuser/ClimbBud/pose-landmarks/start.sh", line 0
+SyntaxError: invalid syntax (start.sh, line 4)
+Sun Nov 22 06:15:27 UTC 2026 starting
+  File "/data/home/qnxuser/ClimbBud/pose-landmarks/start.sh", line 4
+    exec python3 src/main.py --headless --stream --camera-url "${CAMERA_URL:-http://192.168.50.1:8081/stream}"
+    ^^^^^^^^^^^^
+SyntaxError: Missing parentheses in call to 'exec'. Did you mean exec(...)?
+Sun Nov 22 06:15:27 UTC 2026 exited with 1, restarting in 5s
+Sun Nov 22 06:15:32 UTC 2026 starting
+  File "/data/home/qnxuser/ClimbBud/pose-landmarks/start.sh", line 4
+    exec python3 src/main.py --headless --stream --camera-url "${CAMERA_URL:-http://192.168.50.1:8081/stream}"
+    ^^^^^^^^^^^^
+SyntaxError: Missing parentheses in call to 'exec'. Did you mean exec(...)?
+Sun Nov 22 06:15:32 UTC 2026 exited with 1, restarting in 5s
+Sun Nov 22 06:18:47 UTC 2026 starting
+[INFO] initalizing servo position
+[INFO] camera stream connected: http://192.168.50.1:8081/stream
+[INFO] backends: servos=qnx camera=mjpeg inference=opencv
+[INFO] Streaming at http://172.20.10.2:8080/  (raw MJPEG: /stream, data: /pose)
+[INFO] camera (mjpeg) frame: shape=(480, 640, 3)
+[WARN] no camera frame, retrying
+[WARN] camera stream unavailable (timed out); retrying every 2s
+[INFO] camera stream connected: http://192.168.50.1:8081/stream
+
+[INFO] Shutdown signal received, cleaning up...
+[INFO] Stopping stream server...
+
+[INFO] Shutdown signal received, cleaning up...
+[INFO] Releasing camera...
+[INFO] Stopping servos and GPIO...
+[INFO] Shutdown complete.
+Thu Jan  1 00:00:10 UTC 1970 starting
+[INFO] initalizing servo position
+[INFO] backends: servos=qnx camera=mjpeg inference=opencv
+[INFO] Streaming at http://172.20.10.2:8080/  (raw MJPEG: /stream, data: /pose)
+[WARN] no camera frame, retrying
+[WARN] camera stream unavailable (<urlopen error timed out>); retrying every 2s
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[INFO] camera stream connected: http://192.168.50.1:8081/stream
+[INFO] camera (mjpeg) frame: shape=(480, 640, 3)
+[WARN] camera stream unavailable (stream ended); retrying every 2s
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[INFO] camera stream connected: http://192.168.50.1:8081/stream
+output:0.23843750003794567
+output:-0.32291666681055853
+rotate left: 3.58
+rotate down: 1.61
+output:-0.06895809240985064
+output:-0.36682452065852206
+rotate right: -1.03
+rotate down: 1.83
+output:0.014571998044883192
+output:-0.360913147503239
+rotate left: 0.22
+rotate down: 1.80
+output:0.016458841628700486
+output:-0.35
+rotate left: 0.25
+rotate down: 1.75
+output:-0.020756274641517213
+output:-0.3404971909040251
+rotate right: -0.31
+rotate down: 1.70
+output:0.34021754233406776
+output:-0.41764465985755117
+rotate left: 5.10
+rotate down: 2.09
+output:0.2956453708685291
+output:-0.335411684169393
+rotate left: 4.43
+rotate down: 1.68
+output:-0.2030486942062406
+output:-0.557462136980968
+rotate right: -3.05
+rotate down: 2.79
+output:-0.2255365133462729
+output:-0.551089129676821
+rotate right: -3.38
+rotate down: 2.76
+output:-0.19914421860704662
+output:-0.4959204998484222
+rotate right: -2.99
+rotate down: 2.48
+output:-0.09775325673956717
+output:-0.3816433216764673
+rotate right: -1.47
+rotate down: 1.91
+output:-0.2451686337079109
+output:-0.5218591475531402
+rotate right: -3.68
+rotate down: 2.61
+output:-0.03542408280066374
+output:-0.39546466408578446
+rotate right: -0.53
+rotate down: 1.98
+output:0.13917607241101476
+output:-0.33040663858314967
+rotate left: 2.09
+rotate down: 1.65
+
+[INFO] Shutdown signal received, cleaning up...
+[INFO] Stopping stream server...
+gpio_rpi.error: RPI_GPIO_PWM_DUTY: Bad file descriptor
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/data/home/qnxuser/ClimbBud/pose-landmarks/src/main.py", line 346, in <module>
+    main()
+    ~~~~^^
+  File "/data/home/qnxuser/ClimbBud/pose-landmarks/src/main.py", line 332, in main
+    io.center()
+    ~~~~~~~~~^^
+  File "/data/home/qnxuser/ClimbBud/pose-landmarks/src/io_control_qnx.py", line 120, in center
+    self._apply()
+    ~~~~~~~~~~~^^
+  File "/data/home/qnxuser/ClimbBud/pose-landmarks/src/io_control_qnx.py", line 75, in _apply
+    self.set_servo_pulsewidth(self.base_pin, self.degrees_to_pulsewidth(self.base_angle))
+    ~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/data/home/qnxuser/ClimbBud/pose-landmarks/src/io_control_qnx.py", line 72, in set_servo_pulsewidth
+    self._pwm[pin].ChangeDutyCycle(self.pulsewidth_to_duty(pulsewidth))
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+SystemError: <method 'ChangeDutyCycle' of 'rpi_gpio.PWM' objects> returned a result with an exception set
+Thu Jan  1 00:00:10 UTC 1970 starting
+[INFO] initalizing servo position
+[WARN] camera stream unavailable (<urlopen error [Errno 251] Network is unreachable>); retrying every 2s
+[INFO] backends: servos=qnx camera=mjpeg inference=opencv
+[INFO] Streaming at http://127.0.0.1:8080/  (raw MJPEG: /stream, data: /pose)
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[INFO] camera stream connected: http://192.168.50.1:8081/stream
+[INFO] camera (mjpeg) frame: shape=(480, 640, 3)
+
+[INFO] Shutdown signal received, cleaning up...
+[INFO] Stopping stream server...
+gpio_rpi.error: RPI_GPIO_PWM_DUTY: Bad file descriptor
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/data/home/qnxuser/ClimbBud/pose-landmarks/src/main.py", line 346, in <module>
+    main()
+    ~~~~^^
+  File "/data/home/qnxuser/ClimbBud/pose-landmarks/src/main.py", line 332, in main
+    io.center()
+    ~~~~~~~~~^^
+  File "/data/home/qnxuser/ClimbBud/pose-landmarks/src/io_control_qnx.py", line 120, in center
+    self._apply()
+    ~~~~~~~~~~~^^
+  File "/data/home/qnxuser/ClimbBud/pose-landmarks/src/io_control_qnx.py", line 75, in _apply
+    self.set_servo_pulsewidth(self.base_pin, self.degrees_to_pulsewidth(self.base_angle))
+    ~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/data/home/qnxuser/ClimbBud/pose-landmarks/src/io_control_qnx.py", line 72, in set_servo_pulsewidth
+    self._pwm[pin].ChangeDutyCycle(self.pulsewidth_to_duty(pulsewidth))
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+SystemError: <method 'ChangeDutyCycle' of 'rpi_gpio.PWM' objects> returned a result with an exception set
+Thu Jan  1 00:00:10 UTC 1970 starting
+Exception in thread Thread-3 (process_request_thread):
+Traceback (most recent call last):
+  File "/system/lib/python3.14/threading.py", line 1081, in _bootstrap_inner
+    self._context.run(self.run)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^
+  File "/system/lib/python3.14/threading.py", line 1023, in run
+    self._target(*self._args, **self._kwargs)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/system/lib/python3.14/socketserver.py", line 701, in process_request_thread
+    self.shutdown_request(request)
+    ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^
+  File "/system/lib/python3.14/socketserver.py", line 521, in shutdown_request
+    self.close_request(request)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^
+  File "/system/lib/python3.14/socketserver.py", line 525, in close_request
+    request.close()
+    ~~~~~~~~~~~~~^^
+  File "/system/lib/python3.14/socket.py", line 511, in close
+    self._real_close()
+    ~~~~~~~~~~~~~~~~^^
+  File "/system/lib/python3.14/socket.py", line 505, in _real_close
+    _ss.close(self)
+    ~~~~~~~~~^^^^^^
+OSError: [Errno 9] Bad file descriptor
+Thu Jan  1 00:00:10 UTC 1970 starting
+[INFO] initalizing servo position
+[WARN] camera stream unavailable (<urlopen error [Errno 251] Network is unreachable>); retrying every 2s
+[INFO] backends: servos=qnx camera=mjpeg inference=opencv
+[INFO] Streaming at http://127.0.0.1:8080/  (raw MJPEG: /stream, data: /pose)
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[WARN] no camera frame, retrying
+[INFO] camera stream connected: http://192.168.50.1:8081/stream
+[INFO] camera (mjpeg) frame: shape=(480, 640, 3)
+output:0.39879613315606033
+output:-0.45003085871550574
+rotate left: 5.98
+rotate down: 2.25
+output:0.1877298884086607
+output:-0.42553238360921136
+rotate left: 2.82
+rotate down: 2.13
+output:0.4285489026233438
+output:-0.37295267151208805
+rotate left: 6.43
+rotate down: 1.86
+output:0.29629795168672307
+output:-0.396189495793
+rotate left: 4.44
+rotate down: 1.98
+output:0.3283440907929899
+output:-0.4617103456749962
+rotate left: 4.93
+rotate down: 2.31
+output:0.12137817990159774
+output:-0.46734221096787276
+rotate left: 1.82
+rotate down: 2.34
+output:-0.04020319208356357
+output:-0.4666666666666667
+rotate right: -0.60
+rotate down: 2.33
+output:0.06612177319296367
+output:-0.443501906495095
+rotate left: 0.99
+rotate down: 2.22
+output:-0.034965022938058435
+output:-0.46898839224472444
+rotate right: -0.52
+rotate down: 2.34
+output:-0.3823761648147541
+output:-0.3462710568797343
+rotate right: -5.74
+rotate down: 1.73
+output:-0.42343219490584527
+output:-0.13410336442880016
+rotate right: -6.35
+rotate down: 0.67
+output:-0.7023108887231665
+output:0.16713769801089495
+rotate right: -10.53
+rotate up: 0.84
+output:-0.5718169575849371
+output:1.0263973878554387
+rotate right: -8.58
+rotate up: 5.13
+output:-0.00979706882639289
+output:-0.8136665941473332
+rotate right: -0.15
+rotate down: 4.07
+output:0.3443519377815589
+output:-0.17729936034234853
+rotate left: 5.17
+rotate down: 0.89
+output:0.16313799344825125
+output:-0.17573278532441688
+rotate left: 2.45
+rotate down: 0.88
+output:-0.12058689777630824
+output:0.22004615655354404
+rotate right: -1.81
+rotate up: 1.10
+output:-0.790663194939377
+output:0.40988687114663613
+rotate right: -11.86
+rotate up: 2.05
+output:-0.013367361076965428
+output:-0.12223618122313638
+rotate right: -0.20
+rotate down: 0.61
+output:0.7190282297733264
+output:-0.342788498424827
+rotate left: 10.79
+rotate down: 1.71
+output:0.2852762828801706
+output:0.044802086340555346
+rotate left: 4.28
+rotate up: 0.22
+output:-0.17195389809120062
+output:-0.47652510994590325
+rotate right: -2.58
+rotate down: 2.38
+output:-0.06742283478260955
+output:0.4843854610247758
+rotate right: -1.01
+rotate up: 2.42
+output:-0.13056971706036263
+output:0.24550910239623602
+rotate right: -1.96
+rotate up: 1.23
+output:0.023088035806513883
+output:-1.317698014866797
+rotate left: 0.35
+rotate down: 6.59
+output:0.3725118663651454
+output:0.1267077298162322
+rotate left: 5.59
+rotate up: 0.63
+output:0.554669011474412
+output:-0.4285554057467032
+rotate left: 8.32
+rotate down: 2.14
+output:0.32853259569968213
+output:-0.37756166345544206
+rotate left: 4.93
+rotate down: 1.89
+output:0.229222029844049
+output:-0.3700797943694565
+rotate left: 3.44
+rotate down: 1.85
+output:0.2808477866386831
+output:-0.3770833333333333
+rotate left: 4.21
+rotate down: 1.89
+output:-0.15612917764661466
+output:-0.5955118653362639
+rotate right: -2.34
+rotate down: 2.98
+output:-0.015566209182440404
+output:-0.46384647687761793
+rotate right: -0.23
+rotate down: 2.32
+output:-0.06234504196977738
+output:-0.2995456460656176
+rotate right: -0.94
+rotate down: 1.50
+output:0.42412167964298364
+output:-0.513551447767558
+rotate left: 6.36
+rotate down: 2.57
+output:0.024767402198209443
+output:-0.432898104994666
+rotate left: 0.37
+rotate down: 2.16
+output:-0.055730335168451384
+output:-0.44976501680685554
+rotate right: -0.84
+rotate down: 2.25
+output:-0.0621638906016756
+output:-0.44222746947290775
+rotate right: -0.93
+rotate down: 2.21
+output:-0.36473088632942896
+output:-0.4613982155442552
+rotate right: -5.47
+rotate down: 2.31
+output:-0.2743147283135159
+output:-0.45108396980577814
+rotate right: -4.11
+rotate down: 2.26
+output:-0.2920220031201388
+output:-0.4749752845532441
+rotate right: -4.38
+rotate down: 2.37
+output:0.4610181258010648
+output:-0.2249501906730105
+rotate left: 6.92
+rotate down: 1.12
+output:-0.0038244979079371452
+output:-0.4003042683659081
+rotate right: -0.06
+rotate down: 2.00
+output:0.40489620482636923
+output:-0.5919115183256349
+rotate left: 6.07
+rotate down: 2.96
+output:0.09537807526579761
+output:-0.3926038078252881
+rotate left: 1.43
+rotate down: 1.96
+output:-0.21771919810556847
+output:-0.38301932414235573
+rotate right: -3.27
+rotate down: 1.92
+output:0.12398608220931011
+output:-0.39919049050351046
+rotate left: 1.86
+rotate down: 2.00
+output:0.11873701530758585
+output:-0.39501731327840406
+rotate left: 1.78
+rotate down: 1.98
+output:0.4226188631839219
+output:-0.003993523588899865
+rotate left: 6.34
+rotate down: 0.02
+output:0.17471557338854038
+output:0.0491122376511165
+rotate left: 2.62
+rotate up: 0.25
+output:-0.014398119397223533
+output:-1.0723094879084138
+rotate right: -0.22
+rotate down: 5.36
+output:-0.1948095352364004
+output:-0.28386786140783804
+rotate right: -2.92
+rotate down: 1.42
+output:-0.23709762213131572
+output:-0.2292102761712184
+rotate right: -3.56
+rotate down: 1.15
+output:0.12268694195973001
+output:-0.4110012793136931
+rotate left: 1.84
+rotate down: 2.06
+output:-0.3805082168467582
+output:0.3282773901880036
+rotate right: -5.71
+rotate up: 1.64
+output:-0.532591743837763
+output:0.09697739751030961
+rotate right: -7.99
+rotate up: 0.48
+output:-0.17030604579847247
+output:-0.08695456509446745
+rotate right: -2.55
+rotate down: 0.43
+output:-0.27955720113486815
+output:-0.7100648447078919
+rotate right: -4.19
+rotate down: 3.55
+output:0.04658134694364696
+output:-0.45661128386848393
+rotate left: 0.70
+rotate down: 2.28
+output:0.3304879995299337
+output:-0.24528231654509458
+rotate left: 4.96
+rotate down: 1.23
+output:0.15738692842750435
+output:-0.23630345481977422
+rotate left: 2.36
+rotate down: 1.18
+output:-0.042762774159834815
+output:-0.2640810858493489
+rotate right: -0.64
+rotate down: 1.32
+output:-0.0860350818814926
+output:-0.3142187797819789
+rotate right: -1.29
+rotate down: 1.57
+output:-0.19349105686910256
+output:0.32605705252834605
+rotate right: -2.90
+rotate up: 1.63
+output:0.03653588368865111
+output:0.1727322661018729
+rotate left: 0.55
+rotate up: 0.86
+output:0.06181026502714172
+output:-0.20018265232294652
+rotate left: 0.93
+rotate down: 1.00
+output:-0.08881021786807913
+output:-0.06694958300342774
+rotate right: -1.33
+rotate down: 0.33
+output:-0.06974190246633613
+output:-0.07105336960640772
+rotate right: -1.05
+rotate down: 0.36
+output:-0.003265240939768054
+output:-0.03250948076676035
+rotate right: -0.05
+rotate down: 0.16
+output:0.00968687271607404
+output:-0.041583661640113845
+rotate left: 0.15
+rotate down: 0.21
+output:-0.05008927320581479
+output:-0.04791666666666667
+rotate right: -0.75
+rotate down: 0.24
+output:0.028553137418680267
+output:-0.04791666666666667
+rotate left: 0.43
+rotate down: 0.24
+output:0.08167661107923715
+output:-0.02649778598787297
+rotate left: 1.23
+rotate down: 0.13
+output:0.007032035558758906
+output:-0.0768740794317553
+rotate left: 0.11
+rotate down: 0.38
+output:-0.1637837717433936
+output:0.2887265025573815
+rotate right: -2.46
+rotate up: 1.44
+output:0.13819614630224655
+output:-1.0042184524323057
+rotate left: 2.07
+rotate down: 5.02
+output:-0.9401501384929779
+output:0.8741010785400914
+rotate right: -14.10
+rotate up: 4.37
+output:0.3187459455508499
+output:-0.21265490824738065
+rotate left: 4.78
+rotate down: 1.06
+output:0.6813549274941035
+output:0.5762001756405837
+rotate left: 10.22
+rotate up: 2.88
+output:0.25857291953779854
+output:-1.2383881408934592
+rotate left: 3.88
+rotate down: 6.19
+output:0.730815412479336
+output:1.2949389265257047
+rotate left: 10.96
+rotate up: 6.47
+output:-0.3284062587433621
+output:-1.207969623060288
+rotate right: -4.93
+rotate down: 6.04
+output:0.1262432821933084
+output:0.05272804529685271
+rotate left: 1.89
+rotate up: 0.26
+output:-0.3714719026894251
+output:0.26409837995199975
+rotate right: -5.57
+rotate up: 1.32
+output:-0.33610483888688314
+output:0.013671969778913301
+rotate right: -5.04
+rotate up: 0.07
+output:-0.03545912821896059
+output:-0.5282835330139155
+rotate right: -0.53
+rotate down: 2.64
+output:0.10160493120832778
+output:0.3343739594820742
+rotate left: 1.52
+rotate up: 1.67
+output:-0.6149732483183838
+output:-0.33175703000984336
+rotate right: -9.22
+rotate down: 1.66
+output:0.03792657512649028
+output:-0.5612229999053933
+rotate left: 0.57
+rotate down: 2.81
+output:0.12862662886512627
+output:0.2951150434371089
+rotate left: 1.93
+rotate up: 1.48
+output:0.024529895785478945
+output:0.11144127960367071
+rotate left: 0.37
+rotate up: 0.56
+output:-0.5158502130653266
+output:-1.0084813804878061
+rotate right: -7.74
+rotate down: 5.04
+output:-0.8071396578031438
+output:0.9148034597896522
+rotate right: -12.11
+rotate up: 4.57
+output:0.10745393876630813
+output:0.8181964112162062
+rotate left: 1.61
+rotate up: 4.09
+output:-0.520236809060507
+output:-1.242472872690217
+rotate right: -7.80
+rotate down: 6.21
+output:0.2261933783568784
+output:0.39663075346219634
+rotate left: 3.39
+rotate up: 1.98
+output:-0.07183410607378012
+output:-0.11447441571559266
+rotate right: -1.08
+rotate down: 0.57
+output:0.6352425579235401
+output:-0.22300237236957637
+rotate left: 9.53
+rotate down: 1.12
+output:0.19120796440893062
+output:0.4525015562942808
+rotate left: 2.87
+rotate up: 2.26
+output:-0.8311560438976671
+output:-0.13840153814514014
+rotate right: -12.47
+rotate down: 0.69
+output:-0.7035148147534183
+output:-0.4471287843327616
+rotate right: -10.55
+rotate down: 2.24
+output:-0.09528386689530371
+output:-0.028689961291073193
+rotate right: -1.43
+rotate down: 0.14
+output:-0.39649763715329517
+output:-0.22364577236102012
+rotate right: -5.95
+rotate down: 1.12
+output:-0.2925898968737269
+output:-0.1292331681567746
+rotate right: -4.39
+rotate down: 0.65
+output:-0.4105499644117285
+output:0.009316826281228777
+rotate right: -6.16
+rotate up: 0.05
+output:-0.34906312361022496
+output:-0.29790843994405947
+rotate right: -5.24
+rotate down: 1.49
+output:-0.37582933455477896
+output:0.2867626192619703
+rotate right: -5.64
+rotate up: 1.43
+output:-0.36968749999999995
+output:0.008333333333333333
+rotate right: -5.55
+rotate up: 0.04
+output:-0.2707177991365566
+output:-0.35016250089360385
+rotate right: -4.06
+rotate down: 1.75
+output:-0.48376539570598237
+output:0.6663885020009832
+rotate right: -7.26
+rotate up: 3.33
+output:-0.28347680529311714
+output:-0.05095166183585713
+rotate right: -4.25
+rotate down: 0.25
+output:-0.6918468105346791
+output:-0.30288628640493087
+rotate right: -10.38
+rotate down: 1.51
+output:-0.16668674732452068
+output:0.20994046515953585
+rotate right: -2.50
+rotate up: 1.05
+output:0.010956790176217396
+output:-0.07821996272527522
+rotate left: 0.16
+rotate down: 0.39
+output:-0.000941689816049811
+output:0.0174786629222379
+rotate right: -0.01
+rotate up: 0.09
+output:-0.27117821906160455
+output:0.49026610045100505
+rotate right: -4.07
+rotate up: 2.45
+output:-0.1246722147731798
+output:-0.11760760783398119
+rotate right: -1.87
+rotate down: 0.59
+output:0.03850633288638848
+output:0.03189207242644652
+rotate left: 0.58
+rotate up: 0.16
+output:-0.14235136531386824
+output:1.0700169135948903
+rotate right: -2.14
+rotate up: 5.35
+output:0.4796317488734161
+output:-0.07231780642993144
+rotate left: 7.19
+rotate down: 0.36
+output:0.13707203309821683
+output:-0.13962968452759644
+rotate left: 2.06
+rotate down: 0.70
+output:-0.10083069327588014
+output:0.4985538091207806
+rotate right: -1.51
+rotate up: 2.49
+output:0.54866238791234
+output:-0.26245467548734935
+rotate left: 8.23
+rotate down: 1.31
+output:-0.49069682368237766
+output:0.5598383680257708
+rotate right: -7.36
+rotate up: 2.80
+output:0.08089560061374607
+output:-0.17513375065702635
+rotate left: 1.21
+rotate down: 0.88
+output:0.4464906052897405
+output:0.7230307280057873
+rotate left: 6.70
+rotate up: 3.62
+output:0.027580967351402436
+output:0.2472474316808195
+rotate left: 0.41
+rotate up: 1.24
+output:-0.5279035314541032
+output:0.4532026494608772
+rotate right: -7.92
+rotate up: 2.27
+output:-0.2164977173444385
+output:0.3237966776882164
+rotate right: -3.25
+rotate up: 1.62
+output:0.19423821788867154
+output:0.07589397964400421
+rotate left: 2.91
+rotate up: 0.38
+output:0.2815720176165704
+output:-0.12841862477328636
+rotate left: 4.22
+rotate down: 0.64
+output:0.14225920808431552
+output:0.37975892577907555
+rotate left: 2.13
+rotate up: 1.90
+output:-0.13374299510416748
+output:0.15776324650371942
+rotate right: -2.01
+rotate up: 0.79
+output:0.007369027408024054
+output:0.4224843997808976
+rotate left: 0.11
+rotate up: 2.11
+output:-0.012154563643552723
+output:-0.30492079177471226
+rotate right: -0.18
+rotate down: 1.52
+output:0.19288610374250786
+output:0.33876058771920214
+rotate left: 2.89
+rotate up: 1.69
+output:0.10343213706897103
+output:0.17508907545615246
+rotate left: 1.55
+rotate up: 0.88
+output:-0.07161363171147532
+output:0.16875
+rotate right: -1.07
+rotate up: 0.84
+output:-0.05069967860081679
+output:0.38090014420126955
+rotate right: -0.76
+rotate up: 1.90
+output:0.10194808793560065
+output:0.20366433497942477
+rotate left: 1.53
+rotate up: 1.02
+output:0.0010481013824322656
+output:0.04983522350631049
+rotate left: 0.02
+rotate up: 0.25
+output:-0.04861403175307756
+output:0.19464119893814202
+rotate right: -0.73
+rotate up: 0.97
+output:-0.12652191573637697
+output:0.18035749992898198
+rotate right: -1.90
+rotate up: 0.90
+output:0.1014052909086469
+output:-0.015504384963434453
+rotate left: 1.52
+rotate down: 0.08
+output:0.07367460119981327
+output:-0.10047473082670358
+rotate left: 1.11
+rotate down: 0.50
+output:0.0010861588629441574
+output:0.022916666666666665
+rotate left: 0.02
+rotate up: 0.11
+output:-0.05959487420656756
+output:0.012312251096388272
+rotate right: -0.89
+rotate up: 0.06
+output:-0.07489157501018578
+output:0.16266883688338968
+rotate right: -1.12
+rotate up: 0.81
+output:0.09413011835806977
+output:0.021719230055462724
+rotate left: 1.41
+rotate up: 0.11
+output:0.06658355981097636
+output:0.04884715033653865
+rotate left: 1.00
+rotate up: 0.24
+output:0.015919483410740825
+output:0.02532720853124161
+rotate left: 0.24
+rotate up: 0.13
+output:-0.07877732512214308
+output:0.02019925802837342
+rotate right: -1.18
+rotate up: 0.10
+output:-0.039375
+output:0.1188338943778478
+rotate right: -0.59
+rotate up: 0.59
+output:0.06976879470440239
+output:0.03459484309138203
+rotate left: 1.05
+rotate up: 0.17
+output:0.006775715048278438
+output:-0.22327675755566886
+rotate left: 0.10
+rotate down: 1.12
+output:-0.049174279333194376
+output:-0.03296360757249147
+rotate right: -0.74
+rotate down: 0.16
+output:-0.11502984122136721
+output:0.13625755987347365
+rotate right: -1.73
+rotate up: 0.68
+output:0.09839373171701804
+output:0.12189470194031785
+rotate left: 1.48
+rotate up: 0.61
+output:0.012325613626357756
+output:0.014302416986349011
+rotate left: 0.18
+rotate up: 0.07
+output:0.5270133727179076
+output:-0.4144833182987163
+rotate left: 7.91
+rotate down: 2.07
+output:0.6265842464180674
+output:-0.04777968850592033
+rotate left: 9.40
+rotate down: 0.24
+output:0.2897838860063942
+output:-0.04125523652877243
+rotate left: 4.35
+rotate down: 0.21
+output:-0.0250891050106148
+output:0.16355492585364675
+rotate right: -0.38
+rotate up: 0.82
+output:-0.08681551946903225
+output:0.06489286159535315
+rotate right: -1.30
+rotate up: 0.32
+output:-0.3016133942811528
+output:-0.0016877222337140438
+rotate right: -4.52
+rotate down: 0.01
+output:-0.5629075102461583
+output:0.9620790445302154
+rotate right: -8.44
+rotate up: 4.81
+output:-0.45356546469631315
+output:-0.26658142356820536
+rotate right: -6.80
+rotate down: 1.33
+output:-0.48364067173468817
+output:-0.36090438304481076
+rotate right: -7.25
+rotate down: 1.80
+output:-0.5490614138068846
+output:0.057950180917052965
+rotate right: -8.24
+rotate up: 0.29
+output:-0.4763086562229437
+output:-0.06264813994861411
+rotate right: -7.14
+rotate down: 0.31
+output:-0.2502851755729264
+output:-0.2307481917261371
+rotate right: -3.75
+rotate down: 1.15
+output:0.035206515994191265
+output:-0.07294639364619043
+rotate left: 0.53
+rotate down: 0.36
+output:0.1129759194958579
+output:0.0644585159526816
+rotate left: 1.69
+rotate up: 0.32
+output:-0.0002356797069636065
+output:0.08907910225965576
+rotate right: -0.00
+rotate up: 0.45
+output:-0.01074599665364132
+output:0.1107703504143784
+rotate right: -0.16
+rotate up: 0.55
+output:0.025085430322680024
+output:-0.054736277540637736
+rotate left: 0.38
+rotate down: 0.27
+output:-0.032540798228433136
+output:-0.188085016737564
+rotate right: -0.49
+rotate down: 0.94
+output:0.22790958123862043
+output:-0.36823187661688506
+rotate left: 3.42
+rotate down: 1.84
+output:0.5532664034480033
+output:0.1542089227251292
+rotate left: 8.30
+rotate up: 0.77
+output:0.2986496164781658
+output:0.16277845593054724
+rotate left: 4.48
+rotate up: 0.81
+output:0.025034997098598563
+output:0.11207217379841578
+rotate left: 0.38
+rotate up: 0.56
+output:0.07586136491933623
+output:-0.3174572074670745
+rotate left: 1.14
+rotate down: 1.59
+output:-0.038451150784776456
+output:-0.11558877561640689
+rotate right: -0.58
+rotate down: 0.58
+output:0.0006568050233922559
+output:0.29212638245449096
+rotate left: 0.01
+rotate up: 1.46
+output:-0.026310611871526807
+output:-0.1648596626216102
+rotate right: -0.39
+rotate down: 0.82
+output:0.05308098360978526
+output:-0.2567523345105701
+rotate left: 0.80
+rotate down: 1.28
+output:0.045567151999580884
+output:-0.05950586567731033
+rotate left: 0.68
+rotate down: 0.30
+output:-0.005196858502066016
+output:0.2924583360552121
+rotate right: -0.08
+rotate up: 1.46
+output:-0.35329400400511557
+output:0.17697340953232885
+rotate right: -5.30
+rotate up: 0.88
+output:0.47076493179921486
+output:-0.40707007054799715
+rotate left: 7.06
+rotate down: 2.04
+output:0.3835303685570639
+output:0.05149410040875034
+rotate left: 5.75
+rotate up: 0.26
+output:-0.24853344682476566
+output:0.19039819301232302
+rotate right: -3.73
+rotate up: 0.95
+output:-0.29660440737554233
+output:0.09343342471175939
+rotate right: -4.45
+rotate up: 0.47
+output:0.027223543252082122
+output:0.7423646768842783
+rotate left: 0.41
+rotate up: 3.71
+output:-0.14066454190827
+output:0.394621287971141
+rotate right: -2.11
+rotate up: 1.97
+output:0.11968800835090765
+output:-0.11307525161883755
+rotate left: 1.80
+rotate down: 0.57
+output:-0.048566954683546396
+output:-0.25800133720730445
+rotate right: -0.73
+rotate down: 1.29
+output:-0.23965938627463135
+output:-0.7727625953002335
+rotate right: -3.59
+rotate down: 3.86
+output:0.3352086333694812
+output:-0.028428277677511687
+rotate left: 5.03
+rotate down: 0.14
+output:0.722619214325974
+output:0.32857986019533686
+rotate left: 10.84
+rotate up: 1.64
+output:0.4585092030808158
+output:-0.04484858929631774
+rotate left: 6.88
+rotate down: 0.22
+output:0.44215629463727657
+output:0.013309630177088704
+rotate left: 6.63
+rotate up: 0.07
+output:0.5429072439881969
+output:0.2879006664037482
+rotate left: 8.14
+rotate up: 1.44
+output:0.3387868834049378
+output:0.4099545886191255
+rotate left: 5.08
+rotate up: 2.05
+output:0.7478678576736695
+output:-0.16813554030220032
+rotate left: 11.22
+rotate down: 0.84
+output:0.6562261155049329
+output:0.11088070828689456
+rotate left: 9.84
+rotate up: 0.55
+output:-0.13838590930986766
+output:-0.005285267089591477
+rotate right: -2.08
+rotate down: 0.03
+output:0.02933193323823769
+output:0.3667926658568189
+rotate left: 0.44
+rotate up: 1.83
+output:0.02066405738467582
+output:0.33541666666666664
+rotate left: 0.31
+rotate up: 1.68
+output:-0.029171372692456732
+output:0.2821670646687493
+rotate right: -0.44
+rotate up: 1.41
+output:0.006111389386300008
+output:0.25047085912642325
+rotate left: 0.09
+rotate up: 1.25
+output:0.027405863116733722
+output:0.14956491750905732
+rotate left: 0.41
+rotate up: 0.75
+output:-0.023208094539266817
+output:-0.08235860168369041
+rotate right: -0.35
+rotate down: 0.41
+output:0.01507184715316244
+output:-0.1398572640032006
+rotate left: 0.23
+rotate down: 0.70
+output:-0.027223549759271826
+output:0.05983651844162968
+rotate right: -0.41
+rotate up: 0.30
+output:-0.0017083015964222802
+output:0.11104193681509236
+rotate right: -0.03
+rotate up: 0.56
+output:-0.04735710831370024
+output:0.2166483782360738
+rotate right: -0.71
+rotate up: 1.08
+output:-0.026008919953994042
+output:0.6124903423081388
+rotate right: -0.39
+rotate up: 3.06
+output:-0.05895893169378832
+output:-0.024190895257574646
+rotate right: -0.88
+rotate down: 0.12
+output:-0.02769400027288947
+output:-0.0799432015015403
+rotate right: -0.42
+rotate down: 0.40
+output:-0.02489172842904375
+output:0.06346129635587178
+rotate right: -0.37
+rotate up: 0.32
+output:-0.018268016367206368
+output:0.1998661415510423
+rotate right: -0.27
+rotate up: 1.00
+output:-0.01849331374578887
+output:-0.024582501240937887
+rotate right: -0.28
+rotate down: 0.12
+output:-0.026487524179139903
+output:0.17091722550660815
+rotate right: -0.40
+rotate up: 0.85
+output:-0.04791959058853966
+output:0.015496987287503372
+rotate right: -0.72
+rotate up: 0.08
+output:-0.022489123449391094
+output:0.12339110337713086
+rotate right: -0.34
+rotate up: 0.62
+output:-0.031827423872591874
+output:0.06521751717397713
+rotate right: -0.48
+rotate up: 0.33
+output:-0.023847531929560024
+output:0.028383753335118868
+rotate right: -0.36
+rotate up: 0.14
+output:-0.012630501479325124
+output:0.09239465160601897
+rotate right: -0.19
+rotate up: 0.46
+output:-0.020878890513481147
+output:0.16760336498420678
+rotate right: -0.31
+rotate up: 0.84
+output:0.010671317380448644
+output:0.29399816647721416
+rotate left: 0.16
+rotate up: 1.47
+output:-0.0034000065146517684
+output:0.2524505066860028
+rotate right: -0.05
+rotate up: 1.26
+output:0.0012108737978214874
+output:0.12010705247812817
+rotate left: 0.02
+rotate up: 0.60
+output:0.04761885564911315
+output:0.04731390911619064
+rotate left: 0.71
+rotate up: 0.24
+output:0.030624999999999996
+output:0.125
+rotate left: 0.46
+rotate up: 0.62
+output:0.01709811080089334
+output:-0.14366581331565884
+rotate left: 0.26
+rotate down: 0.72
+output:0.021875
+output:0.00819570569589233
+rotate left: 0.33
+rotate up: 0.04
+output:0.035523749212356126
+output:-0.006813340217712167
+rotate left: 0.53
+rotate down: 0.03
+output:0.03739789130436247
+output:-0.014872065613067875
+rotate left: 0.56
+rotate down: 0.07
+output:0.03160554709306436
+output:-0.04979869904390566
+rotate left: 0.47
+rotate down: 0.25
+output:-0.004493283525734627
+output:0.5720949680244982
+rotate right: -0.07
+rotate up: 2.86
+output:-0.011564812576252338
+output:0.12276076980867079
+rotate right: -0.17
+rotate up: 0.61
+output:-0.03497617176208581
+output:0.11859609914161567
+rotate right: -0.52
+rotate up: 0.59
+output:-0.030869344668983865
+output:-0.13342642098973118
+rotate right: -0.46
+rotate down: 0.67
+output:-0.021663344246403732
+output:-0.037566404015435054
+rotate right: -0.32
+rotate down: 0.19
+output:0.026801016516471945
+output:0.005124252744325005
+rotate left: 0.40
+rotate up: 0.03
+output:0.015548334840990429
+output:-0.12984173459220844
+rotate left: 0.23
+rotate down: 0.65
+output:-0.0004610500215084905
+output:0.0656214663736714
+rotate right: -0.01
+rotate up: 0.33
+output:0.011124284449549614
+output:-0.01783053260926659
+rotate left: 0.17
+rotate down: 0.09
+output:-0.0014293552538073026
+output:0.012859404283506333
+rotate right: -0.02
+rotate up: 0.06
+output:0.01917364161580838
+output:0.01592818979494054
+rotate left: 0.29
+rotate up: 0.08
+output:0.009737189945893216
+output:-0.004318289552839635
+rotate left: 0.15
+rotate down: 0.02
+output:-0.0026636205463637934
+output:-0.11490027677707049
+rotate right: -0.04
+rotate down: 0.57
+output:0.1003412576100256
+output:-0.26005098984598496
+rotate left: 1.51
+rotate down: 1.30
+output:0.12024590592850505
+output:-0.18270147067709602
+rotate left: 1.80
+rotate down: 0.91
+output:0.16537382499722458
+output:-0.2514135690606885
+rotate left: 2.48
+rotate down: 1.26
+output:0.16949422648469065
+output:0.14225453267994437
+rotate left: 2.54
+rotate up: 0.71
+output:0.3165531204338408
+output:-0.13522802377953325
+rotate left: 4.75
+rotate down: 0.68
+output:0.6905509656785278
+output:-0.19829415339744627
+rotate left: 10.36
+rotate down: 0.99
+
+[INFO] Shutdown signal received, cleaning up...
+[INFO] Stopping stream server...
+Exception in thread Thread-2 (process_request_thread):
+Thu Jan  1 00:00:10 UTC 1970 starting

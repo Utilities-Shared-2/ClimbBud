@@ -23,7 +23,8 @@ telemetry/.env before starting the dashboard (environment takes precedence):
                                  camera's frame rate and draws the pose skeleton
                                  client-side, interpolated between the (slow) pose
                                  updates. Empty = show the annotated pose stream.
-                                 Also the source the session video is recorded from.
+                                 Also the source the session video is recorded from
+                                 (unset: the annotated pose stream is recorded).
   RECORDINGS_DIR                 Where session video + pose logs are saved
                                  (default <repo>/recordings).
   MQTT_BROKER_IP / _PORT         Broker carrying climbbud/control/session. START/STOP
@@ -172,7 +173,10 @@ MQTT_BROKER_IP = os.getenv("MQTT_BROKER_IP", "127.0.0.1")
 MQTT_BROKER_PORT = int(os.getenv("MQTT_BROKER_PORT", "1883"))
 UI_TELEMETRY_WORKER = os.getenv("UI_TELEMETRY_WORKER", "1").strip().lower() not in {"0", "false", "no", "off"}
 
-session_recorder = SessionRecorder(CAMERA_STREAM_URL, f"{POSE_STREAM_URL}/pose", RECORDINGS_DIR)
+# Record the raw camera feed when configured; otherwise the pose server's annotated
+# stream (lower frame rate, skeleton drawn in) so there is always video.
+RECORD_VIDEO_URL = CAMERA_STREAM_URL or f"{POSE_STREAM_URL}/stream"
+session_recorder = SessionRecorder(RECORD_VIDEO_URL, f"{POSE_STREAM_URL}/pose", RECORDINGS_DIR)
 
 # Only these /pose fields are forwarded to the browser overlay.
 POSE_OVERLAY_FIELDS = ("timestamp", "enabled", "detected", "frame_shape", "keypoints")
@@ -259,23 +263,44 @@ _control_connected = threading.Event()
 _session_lock = threading.Lock()
 
 
-def on_session_command(command):
-    """Apply a START/STOP: dashboard recording state + video/pose recorder."""
+def set_recording(on, drive_db=False):
+    """
+    The one place a session starts/stops: dashboard timer + video/pose recorder,
+    and (drive_db=True) the in-process telemetry DB session.
+
+    Idempotent: asking for the current state does nothing, so the button, MQTT
+    (voice Pi) and our own echoed MQTT messages can't restart a running session.
+    Returns True if the state changed.
+    """
     with _session_lock:
+        if bool(on) == state["recording"]:
+            return False
         now = time.time()
-        if command == "START":
-            if state["recording"]:
-                state["elapsed"] += now - state["start"]
+        if on:
+            # A new session: the timer starts from zero (stop ends a session, it doesn't pause it)
+            state["elapsed"] = 0.0
             state["recording"] = True
             state["start"] = now
+            if drive_db and telemetry_db:
+                telemetry_db.start_session()
             session_recorder.start()
             threading.Thread(target=_attach_db_session_id, daemon=True).start()
-        elif command == "STOP":
-            if state["recording"]:
-                state["elapsed"] += now - state["start"]
+        else:
+            # Freeze the timer at this session's length until the next start
+            state["elapsed"] += now - state["start"]
             state["recording"] = False
             state["start"] = now
             session_recorder.stop()
+            if drive_db and telemetry_db:
+                telemetry_db.stop_session()
+        return True
+
+
+def on_session_command(command):
+    """START/STOP received over MQTT (voice Pi, other dashboards). The telemetry
+    worker handles the DB session for that same message, so only local state here."""
+    if command in ("START", "STOP"):
+        set_recording(command == "START")
 
 
 def _attach_db_session_id(timeout=3.0):
@@ -437,6 +462,9 @@ def live():
             fall=evaluate_fall([]),
             stream_connected=state["stream_connected"],
             video_source=video_source(),
+            recording=state["recording"],
+            elapsed=read_elapsed(),
+            video_recording=session_recorder.status(),
         ), 503
 
     try:
@@ -448,6 +476,9 @@ def live():
             fall=evaluate_fall([]),
             stream_connected=state["stream_connected"],
             video_source=video_source(),
+            recording=state["recording"],
+            elapsed=read_elapsed(),
+            video_recording=session_recorder.status(),
         ), 503
 
     latest = data["latest"]
@@ -543,23 +574,17 @@ def simulate_fall():
 
 @app.route("/api/recording/toggle", methods=["POST"])
 def toggle():
-    command = "STOP" if state["recording"] else "START"
-    expected = command == "START"
-    if publish_session_command(command):
-        # Our own control subscription applies it; give it a moment so the reply is current.
-        deadline = time.time() + 1.0
-        while state["recording"] != expected and time.time() < deadline:
-            time.sleep(0.02)
-        return jsonify(recording=expected, elapsed=read_elapsed())
-
-    # Broker unreachable: drive the session directly so the button still works offline.
-    if telemetry_db:
-        if expected:
-            telemetry_db.start_session()
-        else:
-            telemetry_db.stop_session()
-    on_session_command(command)
-    return jsonify(recording=state["recording"], elapsed=read_elapsed())
+    """Start/stop recording right now: timer, video + pose recorder and health-stats session."""
+    on = not state["recording"]
+    # In-process telemetry: drive its DB session directly (publishing would make the
+    # in-process worker start a second session).
+    set_recording(on, drive_db=True)
+    if telemetry_db is None:
+        # Telemetry runs elsewhere (or isn't available): tell it over MQTT. Our own
+        # subscription receives the echo, which is a no-op because set_recording is idempotent.
+        publish_session_command("START" if on else "STOP")
+    return jsonify(recording=state["recording"], elapsed=read_elapsed(),
+                   video_recording=session_recorder.status())
 
 
 @app.route("/api/stats")

@@ -189,6 +189,15 @@ function renderChart() {
   }
 }
 
+function showRecording(recording, elapsed) {
+  document.getElementById("recText").textContent = recording ? "Recording…" : "Stopped";
+  document.getElementById("recBtn").classList.toggle("off", !recording);
+  if (Number.isFinite(elapsed)) {
+    document.getElementById("time").textContent = formatElapsed(elapsed);
+    document.getElementById("camTime").textContent = formatElapsed(elapsed);
+  }
+}
+
 async function fetchLive() {
   const request = ++liveRequest;
   const version = fallVersion;
@@ -200,6 +209,8 @@ async function fetchLive() {
     if (!fallActionPending && version === fallVersion) showFall(data.fall);
     if ("video_source" in data) updateVideoState(data.video_source);
     else if (typeof data.stream_connected === "boolean") updateVideoState(data.stream_connected);
+    // Recording state is independent of telemetry: show it even when telemetry is down.
+    if (typeof data.recording === "boolean") showRecording(data.recording, data.elapsed);
     if (!response.ok) throw new Error(data.error || `Live API returned ${response.status}`);
     liveError.hidden = true;
 
@@ -207,12 +218,7 @@ async function fetchLive() {
     document.getElementById("pr").textContent = data.pr;
     document.getElementById("battText").textContent = `${data.battery}%`;
     document.getElementById("battFill").setAttribute("width", String(18 * data.battery / 100));
-    document.getElementById("time").textContent = formatElapsed(data.elapsed);
-    document.getElementById("camTime").textContent = formatElapsed(data.elapsed);
-
     const recording = Boolean(data.recording);
-    document.getElementById("recText").textContent = recording ? "Recording…" : "Paused";
-    document.getElementById("recBtn").classList.toggle("off", !recording);
 
     if (recording && Number.isFinite(data.intensity)) {
       intensityHistory.push(Math.max(0, Math.min(1, data.intensity)));
@@ -408,6 +414,7 @@ document.getElementById("recBtn").addEventListener("click", async () => {
     const response = await fetch("/api/recording/toggle", { method: "POST" });
     if (!response.ok) throw new Error(`Recording API returned ${response.status}`);
     const data = await response.json();
+    showRecording(Boolean(data.recording), data.elapsed);  // immediate feedback
     await fetchLive();
   } catch (error) {
     console.error(error);

@@ -336,40 +336,86 @@ class SessionControlTests(unittest.TestCase):
         self.recorder.stop.assert_called_once()
         self.assertGreaterEqual(state["elapsed"], 0)
 
-    def test_toggle_publishes_command_on_control_topic(self):
-        client = Mock()
-        client.publish.return_value = SimpleNamespace(rc=0)
+    def test_stop_ends_session_and_next_start_resets_timer(self):
+        from ui.app import read_elapsed, set_recording
+        with patch("ui.app.threading.Thread"), patch("ui.app.time.time", return_value=100.0):
+            set_recording(True)
+        with patch("ui.app.time.time", return_value=130.0):
+            set_recording(False)
+            self.assertEqual(read_elapsed(), 30.0)  # frozen at the session's length
+        with patch("ui.app.time.time", return_value=500.0):
+            self.assertEqual(read_elapsed(), 30.0)
+        with patch("ui.app.threading.Thread"), patch("ui.app.time.time", return_value=600.0):
+            set_recording(True)
+            self.assertEqual(read_elapsed(), 0.0)   # new session starts from zero
+        self.assertEqual(self.recorder.stop.call_count, 1)
+        self.assertEqual(self.recorder.start.call_count, 2)
 
-        def deliver(topic, payload, qos):
-            from ui.app import on_session_command, parse_session_command
-            on_session_command(parse_session_command(payload))  # broker echoes to our subscription
-            return SimpleNamespace(rc=0)
-
-        client.publish.side_effect = deliver
-        connected = threading.Event()
-        connected.set()
-        with patch("ui.app.control_client", client), patch("ui.app._control_connected", connected), \
-                patch("ui.app.threading.Thread"):
-            response = self.client.post("/api/recording/toggle")
-        self.assertTrue(response.get_json()["recording"])
-        topic, payload = client.publish.call_args.args[:2]
-        self.assertEqual(topic, "climbbud/control/session")
-        self.assertEqual(json.loads(payload)["command"], "START")
-        self.assertEqual(json.loads(payload)["source"], "dashboard")
+    def test_repeated_commands_are_ignored(self):
+        from ui.app import on_session_command
+        with patch("ui.app.threading.Thread"):
+            on_session_command("START")
+            on_session_command("START")  # e.g. voice says it again / our own echo
         self.recorder.start.assert_called_once()
+        on_session_command("STOP")
+        on_session_command("STOP")
+        self.recorder.stop.assert_called_once()
 
-    def test_toggle_falls_back_when_broker_unreachable(self):
+    def test_toggle_starts_immediately_with_in_process_telemetry(self):
         db = Mock()
-        with patch("ui.app.control_client", None), patch("ui.app.telemetry_db", db), \
+        client = Mock()
+        with patch("ui.app.control_client", client), patch("ui.app.telemetry_db", db), \
                 patch("ui.app.threading.Thread"):
             response = self.client.post("/api/recording/toggle")
-            self.assertTrue(response.get_json()["recording"])
+            data = response.get_json()
+            self.assertTrue(data["recording"])
+            self.assertIn("video_recording", data)
+            self.assertTrue(state["recording"])
             db.start_session.assert_called_once()
             self.recorder.start.assert_called_once()
             response = self.client.post("/api/recording/toggle")
         self.assertFalse(response.get_json()["recording"])
         db.stop_session.assert_called_once()
         self.recorder.stop.assert_called_once()
+        client.publish.assert_not_called()  # would make the in-process worker start a 2nd session
+
+    def test_toggle_without_broker_or_telemetry_still_records(self):
+        with patch("ui.app.control_client", None), patch("ui.app.telemetry_db", None), \
+                patch("ui.app.threading.Thread"):
+            response = self.client.post("/api/recording/toggle")
+        self.assertTrue(response.get_json()["recording"])
+        self.recorder.start.assert_called_once()
+
+    def test_toggle_tells_remote_telemetry_over_mqtt(self):
+        from ui.app import on_session_command, parse_session_command
+
+        def deliver(topic, payload, qos):
+            on_session_command(parse_session_command(payload))  # broker echoes to our subscription
+            return SimpleNamespace(rc=0)
+
+        client = Mock()
+        client.publish.side_effect = deliver
+        connected = threading.Event()
+        connected.set()
+        with patch("ui.app.control_client", client), patch("ui.app._control_connected", connected), \
+                patch("ui.app.telemetry_db", None), patch("ui.app.threading.Thread"):
+            response = self.client.post("/api/recording/toggle")
+        self.assertTrue(response.get_json()["recording"])
+        topic, payload = client.publish.call_args.args[:2]
+        self.assertEqual(topic, "climbbud/control/session")
+        self.assertEqual(json.loads(payload), {**json.loads(payload), "command": "START", "source": "dashboard"})
+        self.recorder.start.assert_called_once()  # the echo didn't restart it
+
+    def test_live_reports_recording_even_when_telemetry_fails(self):
+        database = types.ModuleType("telemetry.db")
+        database.load_live_telemetry = lambda: (_ for _ in ()).throw(RuntimeError("offline"))
+        state["recording"] = True
+        with patch.dict(sys.modules, {"telemetry.db": database}):
+            with self.assertLogs(app.logger, level="ERROR"):
+                response = self.client.get("/api/live")
+        self.assertEqual(response.status_code, 503)
+        self.assertTrue(response.get_json()["recording"])
+        self.assertIn("elapsed", response.get_json())
 
 
 class StatsApiTests(unittest.TestCase):

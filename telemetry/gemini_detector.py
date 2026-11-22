@@ -38,6 +38,32 @@ def get_gemini_client() -> genai.Client:
     return genai.Client(api_key=GEMINI_API_KEY)
 
 
+def generate_field_report(
+    client: genai.Client, session_id: int, metrics: dict
+) -> SessionCoachingReport:
+    prompt = f"""
+You are ClimbBud's AI climbing coach. Write a concise, data-backed field report for Session #{session_id}.
+
+Computed session metrics:
+{metrics}
+
+Use the average and peak heart rate, duration, count and values of acceleration spikes,
+hold-shift count, and terrain stability to describe the climber's effort and movement.
+Set risk_level to HIGH if peak_accel_g > 2.2, MEDIUM if peak_bpm > 175, otherwise LOW.
+Keep the report to 2-3 encouraging sentences and do not invent missing measurements.
+"""
+    response = client.models.generate_content(
+        model="gemini-3.8-flash",
+        contents=prompt,
+        config=types.GenerateContentConfig(
+            response_mime_type="application/json",
+            response_schema=SessionCoachingReport,
+            temperature=0.3,
+        ),
+    )
+    return SessionCoachingReport.model_validate_json(response.text)
+
+
 def fetch_session_metrics(conn: psycopg.Connection, session_id: int) -> dict | None:
     with conn.cursor() as cur:
         cur.execute(

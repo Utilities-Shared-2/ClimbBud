@@ -83,11 +83,19 @@
 
   <!-- STATS -->
   <section id="tab-stats" class="tab">
-    <div class="board stats-grid">
-      <div class="metric"><div><small>Sessions</small><strong id="sSessions">--</strong></div></div>
-      <div class="metric"><div><small>Best time</small><strong><span id="sBest">--</span> <em>s</em></strong></div></div>
-      <div class="metric"><div><small>Average time</small><strong><span id="sAvg">--</span> <em>s</em></strong></div></div>
-      <div class="metric"><div><small>Average BPM</small><strong id="sBpm">--</strong></div></div>
+    <div class="board stats-board">
+      <div class="stats-grid">
+        <article class="stat-card"><small>Routes Discovered</small><strong id="sSessions">--</strong></article>
+        <article class="stat-card"><small>Crux Peak</small><strong><span id="sPeak">--</span> <em>BPM</em></strong></article>
+        <article class="stat-card"><small>Longest Ascent</small><strong id="sLongest">--</strong></article>
+        <article class="stat-card"><small>Terrain Stability</small><strong><span id="sStability">--</span><em>%</em></strong></article>
+      </div>
+      <div class="expedition-heading">
+        <div><h2>Expedition Log</h2><p>Every climb, mapped by your watch telemetry.</p></div>
+      </div>
+      <div id="expeditionLog" class="expedition-log" aria-live="polite"></div>
+      <p id="statsEmpty" class="stats-empty" hidden>No telemetry sessions recorded yet.</p>
+      <p id="statsError" class="stats-error" role="alert" hidden></p>
     </div>
   </section>
 

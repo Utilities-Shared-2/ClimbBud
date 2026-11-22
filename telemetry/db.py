@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import json
 import os
 import sqlite3
@@ -7,9 +9,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-import paho.mqtt.client as mqtt
-import psycopg
 from dotenv import load_dotenv
+
+from telemetry.session_metrics import build_sessions, timestamp_epoch
 
 # Load environment variables from telemetry/.env
 ENV_PATH = Path(__file__).resolve().parent / ".env"
@@ -19,6 +21,7 @@ TIGER_DATA_URL = os.getenv("TIGER_DATA_URL")
 MQTT_BROKER_IP = os.getenv("MQTT_BROKER_IP", "127.0.0.1")
 MQTT_BROKER_PORT = int(os.getenv("MQTT_BROKER_PORT", "1883"))
 SQLITE_DB_PATH = Path(__file__).resolve().parent / "climb_data.db"
+WATCH_LOG_PATH = Path(__file__).resolve().parent / "watch_log.jsonl"
 
 FLUSH_INTERVAL_SEC = 1.0
 MAX_BATCH_SIZE = 20
@@ -44,6 +47,8 @@ class TelemetryDatabase:
             print("[DB] TIGER_DATA_URL not set. Running in SQLite fallback mode.")
             return False
         try:
+            import psycopg
+
             # autocommit=True is required for TimescaleDB continuous aggregate DDL
             self.pg_conn = psycopg.connect(
                 self.pg_url,
@@ -351,7 +356,238 @@ class TelemetryDatabase:
             )
 
 
+def _read_postgres_watch_data() -> tuple[list[dict[str, Any]], dict[int, str]]:
+    if not TIGER_DATA_URL:
+        return [], {}
+
+    import psycopg
+
+    assert psycopg is not None
+    with psycopg.connect(TIGER_DATA_URL, connect_timeout=5) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT time, session_id, bpm, accel_g, xyz
+                FROM telemetry_points
+                WHERE source = 'watch'
+                ORDER BY time ASC;
+                """
+            )
+            points = [
+                {
+                    "ts": row[0],
+                    "session_id": row[1],
+                    "bpm": row[2],
+                    "accel_g": row[3],
+                    "xyz": row[4],
+                }
+                for row in cur.fetchall()
+            ]
+            cur.execute(
+                """
+                SELECT DISTINCT ON (session_id) session_id, summary
+                FROM risk_events
+                WHERE signal_type = 'COACHING_SUMMARY' AND session_id IS NOT NULL
+                ORDER BY session_id, created_at DESC, id DESC;
+                """
+            )
+            summaries = {int(row[0]): row[1] for row in cur.fetchall()}
+    return points, summaries
+
+
+def _read_sqlite_watch_data() -> tuple[list[dict[str, Any]], dict[int, str]]:
+    with sqlite3.connect(f"{SQLITE_DB_PATH.resolve().as_uri()}?mode=ro", uri=True) as conn:
+        rows = conn.execute(
+            """
+            SELECT time, session_id, bpm, accel_g, xyz
+            FROM telemetry_points
+            WHERE source = 'watch'
+            ORDER BY time ASC;
+            """
+        ).fetchall()
+        summaries = conn.execute(
+            """
+            SELECT session_id, summary
+            FROM risk_events
+            WHERE signal_type = 'COACHING_SUMMARY' AND session_id IS NOT NULL
+            ORDER BY created_at DESC, id DESC;
+            """
+        ).fetchall()
+
+    latest_summaries: dict[int, str] = {}
+    for session_id, summary in summaries:
+        latest_summaries.setdefault(int(session_id), summary)
+    return (
+        [
+            {
+                "ts": row[0],
+                "session_id": row[1],
+                "bpm": row[2],
+                "accel_g": row[3],
+                "xyz": json.loads(row[4]) if isinstance(row[4], str) else row[4],
+            }
+            for row in rows
+        ],
+        latest_summaries,
+    )
+
+
+def _read_watch_log() -> list[dict[str, Any]]:
+    try:
+        contents = WATCH_LOG_PATH.read_bytes()
+    except FileNotFoundError:
+        return []
+
+    has_utf16_bom = contents.startswith((b"\xff\xfe", b"\xfe\xff"))
+    encoding = "utf-16" if has_utf16_bom else "utf-8-sig"
+    lines = contents.decode(encoding).splitlines()
+    points = []
+    for line_number, line in enumerate(lines, start=1):
+        if not line.lstrip().startswith("{"):
+            continue
+        try:
+            point = json.loads(line)
+        except json.JSONDecodeError as exc:
+            print(f"[DB] Ignoring malformed watch log line {line_number}: {exc}")
+            continue
+        if not isinstance(point, dict) or point.get("source", "watch") != "watch":
+            continue
+        if timestamp_epoch(point.get("ts")) is None:
+            print(f"[DB] Ignoring watch log line {line_number} without a valid timestamp.")
+            continue
+        point["session_id"] = None
+        points.append(point)
+    return points
+
+
+def load_watch_sessions() -> dict[str, Any]:
+    """Load database watch telemetry, falling back to SQLite and then the JSONL log."""
+    try:
+        points, summaries = _read_postgres_watch_data()
+    except Exception as exc:
+        print(f"[DB] Unable to read Tiger Data telemetry ({exc}); trying local SQLite.")
+        points, summaries = [], {}
+    source = "postgres"
+
+    if not points:
+        try:
+            points, summaries = _read_sqlite_watch_data()
+            source = "sqlite"
+        except sqlite3.Error as exc:
+            print(f"[DB] Unable to read local SQLite telemetry ({exc}); trying watch log.")
+            points, summaries = [], {}
+
+    if not points:
+        points = _read_watch_log()
+        summaries = {}
+        source = "jsonl"
+
+    sessions = build_sessions(points)
+    for session in sessions:
+        session["summary"] = (
+            summaries.get(int(session["session_id"]))
+            if session["session_id"] is not None
+            else None
+        )
+    return {"source": source, "sessions": sessions}
+
+
+def get_postgres_connection() -> psycopg.Connection:
+    if not TIGER_DATA_URL:
+        raise RuntimeError("TIGER_DATA_URL is required to save Gemini field reports in Postgres.")
+    import psycopg
+
+    return psycopg.connect(TIGER_DATA_URL, connect_timeout=5)
+
+
+def persist_local_sessions(
+    sessions: list[dict[str, Any]], selected_id: str
+) -> int:
+    """Copy local fallback sessions to Postgres and return the selected database ID."""
+    mapping: dict[str, int] = {}
+    with get_postgres_connection() as conn:
+        with conn.cursor() as cur:
+            for session in sessions:
+                started_at = datetime.fromtimestamp(
+                    timestamp_epoch(session["started_at"]), timezone.utc
+                )
+                ended_at = datetime.fromtimestamp(
+                    timestamp_epoch(session["ended_at"]), timezone.utc
+                )
+                cur.execute(
+                    """
+                    INSERT INTO sessions (started_at, ended_at, status)
+                    VALUES (%s, %s, 'COMPLETED')
+                    RETURNING id;
+                    """,
+                    (started_at, ended_at),
+                )
+                row = cur.fetchone()
+                if not row:
+                    raise RuntimeError("Postgres did not return an ID for an imported session.")
+                database_id = int(row[0])
+                mapping[session["id"]] = database_id
+                cur.executemany(
+                    """
+                    INSERT INTO telemetry_points (
+                        time, session_id, source, bpm, accel_g, xyz
+                    )
+                    VALUES (%s, %s, 'watch', %s, %s, %s::jsonb);
+                    """,
+                    [
+                        (
+                            datetime.fromtimestamp(point["ts"], timezone.utc),
+                            database_id,
+                            point.get("bpm"),
+                            point.get("accel_g"),
+                            json.dumps(point.get("xyz")),
+                        )
+                        for point in session["_points"]
+                    ],
+                )
+
+    if selected_id not in mapping:
+        raise ValueError(f"Unknown local telemetry session: {selected_id}")
+    return mapping[selected_id]
+
+
+def persist_unassigned_postgres_session(session: dict[str, Any]) -> int:
+    """Associate one gap-grouped Postgres session with a durable session row."""
+    started_at = datetime.fromtimestamp(
+        timestamp_epoch(session["started_at"]), timezone.utc
+    )
+    ended_at = datetime.fromtimestamp(
+        timestamp_epoch(session["ended_at"]), timezone.utc
+    )
+    with get_postgres_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO sessions (started_at, ended_at, status)
+                VALUES (%s, %s, 'COMPLETED')
+                RETURNING id;
+                """,
+                (started_at, ended_at),
+            )
+            row = cur.fetchone()
+            if not row:
+                raise RuntimeError("Postgres did not return an ID for the session.")
+            session_id = int(row[0])
+            cur.execute(
+                """
+                UPDATE telemetry_points
+                SET session_id = %s
+                WHERE source = 'watch' AND session_id IS NULL
+                    AND time >= %s AND time <= %s;
+                """,
+                (session_id, started_at, ended_at),
+            )
+    return session_id
+
+
 def create_mqtt_worker(db: TelemetryDatabase) -> mqtt.Client:
+    import paho.mqtt.client as mqtt
+
     def on_connect(client: mqtt.Client, _userdata: Any, _flags: Any, reason_code: Any, _properties: Any = None) -> None:
         print(f"[MQTT] Connected to {MQTT_BROKER_IP}:{MQTT_BROKER_PORT} (rc={reason_code})")
         client.subscribe("climbbud/#")

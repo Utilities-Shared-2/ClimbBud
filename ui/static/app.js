@@ -83,16 +83,105 @@ async function fetchLive() {
 async function fetchStats() {
   try {
     const response = await fetch("/api/stats");
-    if (!response.ok) throw new Error(`Stats API returned ${response.status}`);
     const data = await response.json();
-    document.getElementById("sSessions").textContent = data.sessions;
-    document.getElementById("sBest").textContent = data.best;
-    document.getElementById("sAvg").textContent = data.avg;
-    document.getElementById("sBpm").textContent = data.avg_bpm;
+    if (!response.ok) throw new Error(data.error || `Stats API returned ${response.status}`);
+    document.getElementById("sSessions").textContent = data.routes_discovered;
+    document.getElementById("sPeak").textContent = data.crux_peak;
+    document.getElementById("sLongest").textContent = formatElapsed(data.longest_ascent);
+    document.getElementById("sStability").textContent = data.terrain_stability;
+    document.getElementById("statsError").hidden = true;
+    document.getElementById("statsEmpty").hidden = data.sessions.length > 0;
+    renderExpeditionLog(data.sessions);
   } catch (error) {
     console.error(error);
+    document.getElementById("statsError").textContent = error.message || "Unable to load session telemetry. Please try again.";
+    document.getElementById("statsError").hidden = false;
   }
 }
+
+function renderExpeditionLog(sessions) {
+  const log = document.getElementById("expeditionLog");
+  log.replaceChildren();
+
+  sessions.forEach((session, index) => {
+    const card = document.createElement("article");
+    card.className = "expedition-card";
+
+    const header = document.createElement("div");
+    header.className = "expedition-card-header";
+    const title = document.createElement("h3");
+    title.textContent = `Expedition ${sessions.length - index}`;
+    const date = document.createElement("time");
+    date.textContent = new Date(session.started_at).toLocaleString();
+    header.append(title, date);
+    card.appendChild(header);
+
+    const metrics = document.createElement("dl");
+    metrics.className = "expedition-metrics";
+    [
+      ["Duration", formatElapsed(session.duration_sec)],
+      ["Avg BPM", session.avg_bpm == null ? "—" : `${session.avg_bpm} BPM`],
+      ["Peak BPM", session.peak_bpm == null ? "—" : `${session.peak_bpm} BPM`],
+      ["Hold Shifts", session.hold_shifts],
+      ["Stability", `${session.stability_pct}%`],
+    ].forEach(([label, value]) => {
+      const item = document.createElement("div");
+      const term = document.createElement("dt");
+      const detail = document.createElement("dd");
+      term.textContent = label;
+      detail.textContent = value;
+      item.append(term, detail);
+      metrics.appendChild(item);
+    });
+    card.appendChild(metrics);
+
+    const report = document.createElement("div");
+    report.className = "field-report";
+    const reportTitle = document.createElement("h4");
+    reportTitle.textContent = "Gemini Field Report";
+    const reportText = document.createElement("p");
+    reportText.className = "field-report-text";
+    reportText.textContent = session.summary || "No field report saved for this climb yet.";
+    report.append(reportTitle, reportText);
+    if (!session.summary) {
+      const button = document.createElement("button");
+      button.className = "field-report-button";
+      button.type = "button";
+      button.dataset.sessionId = session.id;
+      button.textContent = "Generate Field Report";
+      report.appendChild(button);
+    }
+    card.appendChild(report);
+    log.appendChild(card);
+  });
+}
+
+document.getElementById("expeditionLog").addEventListener("click", async event => {
+  const button = event.target.closest(".field-report-button");
+  if (!button) return;
+
+  const report = button.closest(".field-report");
+  const reportText = report.querySelector(".field-report-text");
+  button.disabled = true;
+  button.textContent = "Generating…";
+  report.classList.remove("has-error");
+  try {
+    const response = await fetch(
+      `/api/sessions/${encodeURIComponent(button.dataset.sessionId)}/summary`,
+      { method: "POST" }
+    );
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || `Report API returned ${response.status}`);
+    reportText.textContent = data.summary;
+    button.remove();
+  } catch (error) {
+    console.error(error);
+    reportText.textContent = error.message || "Unable to generate the field report.";
+    report.classList.add("has-error");
+    button.disabled = false;
+    button.textContent = "Try Again";
+  }
+});
 
 function showTab(name) {
   document.querySelectorAll(".tab").forEach(tab => tab.classList.remove("active"));

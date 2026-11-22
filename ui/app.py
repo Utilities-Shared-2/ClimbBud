@@ -8,9 +8,15 @@ function with your real heart-rate / camera / pose-tracking code.
 """
 import math
 import random
+import sys
 import time
+from pathlib import Path
 
 from flask import Flask, jsonify, render_template
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 app = Flask(__name__)
 
@@ -68,12 +74,109 @@ def toggle():
 
 @app.route("/api/stats")
 def stats():
-    times = [h["time"] for h in HISTORY]
-    if not times:
-        return jsonify(sessions=0, best=0, avg=0, avg_bpm=0)
-    return jsonify(sessions=len(HISTORY), best=min(times),
-                   avg=round(sum(times) / len(times), 1),
-                   avg_bpm=round(sum(h["bpm"] for h in HISTORY) / len(HISTORY)))
+    try:
+        from telemetry.db import load_watch_sessions
+    except ImportError as exc:
+        app.logger.exception("Telemetry database dependencies are unavailable")
+        return jsonify(error=f"Telemetry database dependencies are unavailable: {exc}"), 503
+
+    data = load_watch_sessions()
+    sessions = data["sessions"]
+    public_sessions = [
+        {key: value for key, value in session.items() if not key.startswith("_")}
+        for session in sessions
+    ]
+    peak_values = [
+        session["peak_bpm"]
+        for session in sessions
+        if session["peak_bpm"] is not None
+    ]
+    durations = [session["duration_sec"] for session in sessions]
+    stability = [session["stability_pct"] for session in sessions]
+    return jsonify(
+        source=data["source"],
+        routes_discovered=len(sessions),
+        crux_peak=max(peak_values, default=0),
+        longest_ascent=max(durations, default=0),
+        terrain_stability=round(sum(stability) / len(stability), 1) if stability else 0,
+        sessions=public_sessions,
+    )
+
+
+@app.route("/api/sessions/<session_key>/summary", methods=["POST"])
+def generate_session_summary(session_key: str):
+    try:
+        import psycopg
+        from telemetry.db import (
+            get_postgres_connection,
+            load_watch_sessions,
+            persist_local_sessions,
+            persist_unassigned_postgres_session,
+        )
+    except ImportError as exc:
+        app.logger.exception("Telemetry database dependencies are unavailable")
+        return jsonify(error=f"Telemetry database dependencies are unavailable: {exc}"), 503
+
+    data = load_watch_sessions()
+    session = next(
+        (item for item in data["sessions"] if item["id"] == session_key),
+        None,
+    )
+    if session is None:
+        return jsonify(error="Session not found."), 404
+    if session["summary"]:
+        return jsonify(session_id=session_key, summary=session["summary"])
+
+    try:
+        from google.genai.errors import APIError
+        from telemetry.gemini_detector import generate_field_report, get_gemini_client
+
+        gemini_client = get_gemini_client()
+    except (ImportError, RuntimeError) as exc:
+        app.logger.exception("Gemini field report dependencies or configuration are unavailable")
+        return jsonify(error=f"Gemini field report dependencies or configuration are unavailable: {exc}"), 503
+
+    try:
+        if data["source"] != "postgres":
+            database_id = persist_local_sessions(data["sessions"], session_key)
+        elif session["session_id"] is None:
+            database_id = persist_unassigned_postgres_session(session)
+        else:
+            database_id = int(session["session_id"])
+
+        report = generate_field_report(
+            gemini_client,
+            database_id,
+            {
+                "duration_sec": session["duration_sec"],
+                "avg_bpm": session["avg_bpm"],
+                "peak_bpm": session["peak_bpm"],
+                "accel_spike_count": session["accel_spike_count"],
+                "accel_spikes": session["accel_spikes"],
+                "peak_accel_g": session["peak_accel_g"],
+                "hold_shifts": session["hold_shifts"],
+                "stability_pct": session["stability_pct"],
+            },
+        )
+
+        with get_postgres_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO risk_events (
+                        session_id, created_at, risk_level, signal_type, summary
+                    )
+                    VALUES (%s, NOW(), %s, 'COACHING_SUMMARY', %s);
+                    """,
+                    (database_id, report.risk_level, report.summary),
+                )
+        return jsonify(session_id=session_key, summary=report.summary)
+    except (RuntimeError, ValueError, psycopg.Error, APIError) as exc:
+        app.logger.exception("Unable to create the session field report")
+        return jsonify(error=str(exc)), 503
+    except ImportError as exc:
+        app.logger.exception("Field report dependencies are unavailable")
+        return jsonify(error=f"Field report dependencies are unavailable: {exc}"), 503
 
 
 if __name__ == "__main__":

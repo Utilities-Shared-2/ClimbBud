@@ -84,6 +84,43 @@ Then, from any device on the same network, open `http://[pi ip]:8080/`.
 - Options: `--stream-port`, `--stream-host`, `--stream-quality` (JPEG, default 70), `--stream-scale` (lower this on a Pi 3 to save CPU/bandwidth)
 - Frames are only encoded while someone is watching. There is no authentication, so only use it on a trusted network. On Windows, allow Python through the firewall for the port.
 
+## Running on QNX 8.0 (Raspberry Pi)
+
+OpenVINO and pigpio don't exist on QNX, and `cv2.VideoCapture` has no camera backend there, so the code picks QNX-friendly backends automatically when `sys.platform` is QNX:
+
+| Part | Raspberry Pi OS / desktop | QNX |
+|---|---|---|
+| Pose model (`--inference`) | OpenVINO | OpenCV DNN (`cv2.dnn`, same ONNX model) |
+| Camera (`--camera-backend`) | `cv2.VideoCapture` | `qnx_apis.VideoCapture` (libcamapi) |
+| Servos (`--io`) | pigpio (`io_control_pigio.py`) | `rpi_gpio` (`io_control_qnx.py`) |
+
+**Rewire the servos.** QNX `rpi_gpio` only drives hardware PWM on GPIO 12, 13, 18 and 19 (12/18 share channel 1, 13/19 share channel 2), so the servos must move off GPIO 17/27:
+
+| | GPIO | physical pin |
+|---|---|---|
+| pan / base servo | 12 | 32 |
+| tilt servo | 13 | 33 |
+| limit switch (unchanged) | 26 | 37 |
+
+**Install packages** (no pip builds needed). See `requirements-qnx.txt`:
+```bash
+  apk update
+  apk add python3-numpy python3-opencv qnx-sf-camapi qnx-sf-camera-usb
+  # build deps for the camera wrapper
+  apk add opencv-dev python3-numpy-dev python3-dev python3-pybind11-dev python3-setuptools
+  git clone --recursive https://github.com/qnx/python3-qnx-apis && cd python3-qnx-apis
+  python setup.py build_ext -j$(nproc) && pip install --break-system-packages .
+```
+Package names can differ between QNX releases; use `apk search <name>` if one isn't found.
+
+**Check and run:**
+```bash
+  pidin -p rpi_gpio                     # GPIO resource manager must be running
+  python3 -c "import cv2; print(cv2.__version__, hasattr(cv2, 'dnn'))"
+  python3 src/main.py --headless --stream
+```
+The startup log prints the backends in use (`[INFO] backends: servos=qnx camera=qnx inference=opencv`) and the camera frame shape. If the servo travel is off, calibrate `degrees_to_pulsewidth` in `io_control_qnx.py` (500–2500 µs maps to 2.5–12.5 % duty at 50 Hz).
+
 
 
 

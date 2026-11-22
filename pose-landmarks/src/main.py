@@ -6,6 +6,7 @@ import os
 
 
 from recognition import PoseDetector
+from camera import open_camera, IS_QNX
 import utils
 import framebox as app
 from stream_server import FrameBroadcaster, start_stream_server, stop_stream_server
@@ -163,12 +164,29 @@ def to_jsonable(value):
     return value
 
 
+def load_io(backend):
+    """Import the IoControl class for a servo backend."""
+    if backend == 'qnx':
+        from io_control_qnx import IoControl
+    elif backend == 'pigpio':
+        from io_control_pigio import IoControl
+    else:
+        from io_control_mock import IoControl
+    return IoControl
+
+
 def main():
     global io, args
     parser = argparse.ArgumentParser(description='Head tracking (YOLO11n-pose) with servo control')
     parser.add_argument('--headless', action='store_true', help='Run without displaying video feed')
-    parser.add_argument('--mock', action='store_true',
-                        help='Use the simulated servos (no Pi/pigpio needed); automatic if pigpio is missing')
+    parser.add_argument('--io', choices=['auto', 'qnx', 'pigpio', 'mock'], default='auto',
+                        help='Servo backend: qnx (rpi_gpio on QNX), pigpio (Raspberry Pi OS) or mock. '
+                             'auto = qnx on QNX, else pigpio, falling back to mock')
+    parser.add_argument('--mock', action='store_true', help='Shortcut for --io mock (simulated servos)')
+    parser.add_argument('--camera-backend', choices=['auto', 'qnx', 'opencv'], default='auto',
+                        help='auto = qnx_apis (libcamapi) on QNX, cv2.VideoCapture elsewhere')
+    parser.add_argument('--inference', choices=['auto', 'openvino', 'opencv'], default='auto',
+                        help='Pose model runtime; auto = OpenVINO if installed (not on QNX), else OpenCV DNN')
     parser.add_argument('--display-scale', type=float, default=2.0,
                         help='Zoom factor for the preview window (display only, default 2.0)')
     parser.add_argument('--no-pose', action='store_true', help='Hide the body pose landmarks')
@@ -185,24 +203,27 @@ def main():
                         help='Resize factor for the streamed frames (default 1.0)')
     args = parser.parse_args()
 
-    if args.mock:
-        from io_control_mock import IoControl
-    else:
+    io_backend = 'mock' if args.mock else args.io
+    if io_backend == 'auto':
+        io_backend = 'qnx' if IS_QNX else 'pigpio'
         try:
-            from io_control_pigio import IoControl
-        except ImportError:
-            print("[INFO] pigpio not available, falling back to simulated servos (--mock)")
-            from io_control_mock import IoControl
-    io = IoControl()
+            io = load_io(io_backend)()
+        except Exception as e:  # missing module, or no daemon / GPIO access
+            print(f"[INFO] {io_backend} servos not available ({e}), falling back to simulated servos (--mock)")
+            io_backend = 'mock'
+            io = load_io(io_backend)()
+    else:
+        io = load_io(io_backend)()
     simulated = hasattr(io, "view")
     max_fps = args.max_fps if args.max_fps else (8.0 if simulated else None)
 
-    cap = cv2.VideoCapture(args.camera)
+    cap = open_camera(args.camera, args.camera_backend)
     if not cap.isOpened():
         print(f"[ERROR] Could not open camera {args.camera}")
         return
 
-    detector = PoseDetector(model=FILE, confidence_thr=0.5, overlap_thr=0.45)
+    detector = PoseDetector(model=FILE, confidence_thr=0.5, overlap_thr=0.45, backend=args.inference)
+    print(f"[INFO] backends: servos={io_backend} camera={cap.backend} inference={detector.backend}")
 
     broadcaster = stream = None
     if args.stream:

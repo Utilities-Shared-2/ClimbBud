@@ -1,5 +1,3 @@
-
-from openvino import Core
 import numpy as np
 import cv2
 
@@ -12,7 +10,8 @@ class FaceDetector:
                  model,
                  confidence_thr=0.5,
                  overlap_thr=0.7):
-        # load and compile the model
+        # load and compile the model (OpenVINO only; not available on QNX)
+        from openvino import Core
         core = Core()
         model = core.read_model(model=model)
         compiled_model = core.compile_model(model=model)
@@ -90,7 +89,8 @@ class FaceDetector:
 
 class PoseDetector:
     """
-    YOLO11n-pose (ONNX, run with OpenVINO).
+    YOLO11n-pose (ONNX), run with OpenVINO when available, otherwise OpenCV DNN
+    (OpenVINO has no QNX build; OpenCV DNN works anywhere cv2 does).
     Model output is [1, 56, N]: per candidate 4 box values (cx, cy, w, h in
     input-pixel space), 1 person score, then 17 COCO keypoints x (x, y, conf).
     """
@@ -110,13 +110,34 @@ class PoseDetector:
                  model,
                  confidence_thr=0.5,
                  overlap_thr=0.45,
-                 kpt_thr=0.5):
-        core = Core()
-        model = core.read_model(model=model)
-        self.model = core.compile_model(model=model)
-        self.output_layer = self.model.output(0)
-        # input shape is [1, 3, H, W]; read it so a re-export at another imgsz still works
-        _, _, self.in_h, self.in_w = [int(d) for d in self.model.input(0).shape]
+                 kpt_thr=0.5,
+                 backend="auto",
+                 input_size=(640, 640)):
+        """
+        :param backend: "openvino", "opencv" or "auto" (OpenVINO if installed, else OpenCV DNN)
+        :param input_size: (w, h) the model was exported at; only used by the OpenCV backend
+                           (OpenVINO reads it from the model)
+        """
+        if backend not in ("auto", "openvino", "opencv"):
+            raise ValueError(f"unknown inference backend {backend!r}")
+        self.backend = None
+        if backend in ("auto", "openvino"):
+            try:
+                from openvino import Core
+            except ImportError:
+                if backend == "openvino":
+                    raise
+            else:
+                core = Core()
+                self.model = core.compile_model(model=core.read_model(model=model))
+                self.output_layer = self.model.output(0)
+                # input shape is [1, 3, H, W]; read it so a re-export at another imgsz still works
+                _, _, self.in_h, self.in_w = [int(d) for d in self.model.input(0).shape]
+                self.backend = "openvino"
+        if self.backend is None:
+            self.net = cv2.dnn.readNetFromONNX(model)
+            self.in_w, self.in_h = input_size
+            self.backend = "opencv"
         self.confidence_thr = confidence_thr
         self.overlap_thr = overlap_thr
         self.kpt_thr = kpt_thr
@@ -170,7 +191,11 @@ class PoseDetector:
 
     def inference(self, image):
         input_image = self.preprocess(image)
-        output = self.model([input_image])[self.output_layer]
+        if self.backend == "openvino":
+            output = self.model([input_image])[self.output_layer]
+        else:
+            self.net.setInput(input_image)
+            output = self.net.forward()
         return self.posprocess(output, image.shape[:2])
 
     @staticmethod

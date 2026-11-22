@@ -46,18 +46,21 @@ signal.signal(signal.SIGINT, signal_handler)
 signal.signal(signal.SIGTERM, signal_handler)
 
 class PIDController:
-    def __init__(self, kp, ki, kd, MAX_PIXEL_ERROR=None, output_limits=1):
+    def __init__(self, kp, ki, kd, MAX_PIXEL_ERROR=None, output_limits=1, d_alpha=0.3):
         # MAX_PIXEL_ERROR is set per frame in center() to half the frame size on that axis
         self.kp = kp
         self.ki = ki
         self.kd = kd
         self.output_limits = output_limits
+        # Low-pass coefficient for the derivative term (0 = ignore D, 1 = no filtering)
+        self.d_alpha = d_alpha
         self.MAX_PIXEL_ERROR = MAX_PIXEL_ERROR
         self.reset()
 
     def reset(self):
         self._prev_error = 0
         self._integral = 0
+        self._derivative = 0
         self._last_time = time.time()
 
     def compute(self, setpoint, measured_value):
@@ -77,9 +80,11 @@ class PIDController:
         normalized_error = max(-1.0, min(1.0, raw_error / self.MAX_PIXEL_ERROR))
 
         self._integral += normalized_error * dt
-        derivative = (normalized_error - self._prev_error) / dt
+        # Filtered derivative: dampens spikes when dt is small/erratic (frame stalls, pauses)
+        raw_derivative = (normalized_error - self._prev_error) / dt
+        self._derivative += self.d_alpha * (raw_derivative - self._derivative)
 
-        output = (self.kp * normalized_error) + (self.ki * self._integral) + (self.kd * derivative)
+        output = (self.kp * normalized_error) + (self.ki * self._integral) + (self.kd * self._derivative)
         print(f"output:{output}")
         output = output*self.output_limits
         self._prev_error = normalized_error

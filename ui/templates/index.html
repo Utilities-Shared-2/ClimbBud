@@ -66,6 +66,13 @@
       <div class="grid">
         <figure class="cam" id="cam">
           <div class="rec"><i class="dot red"></i><span id="camTime">00:00:00</span></div>
+          <div id="videoContainer" class="video-container" hidden>
+            <img id="videoStream" alt="Pose stream" onerror="handleVideoError()">
+          </div>
+          <div id="disconnectedMessage" class="disconnected-message">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M1 1l22 22M1 23L23 1"/><circle cx="12" cy="12" r="9"/><path d="M12 7v2M12 15v2"/></svg>
+            <span>Stream Disconnected</span>
+          </div>
           <svg id="routeSvg" viewBox="0 0 100 100" preserveAspectRatio="none">
             <polyline id="routeLine" points=""/>
             <g id="routeNodes"></g>

@@ -1,10 +1,10 @@
 # QNX 8.0 (Raspberry Pi): install with apk, not pip - see README "Running on QNX".
 # Only these are needed at runtime; openvino and pigpio are NOT used on QNX.
 #
-#   apk add python3-numpy python3-opencv qnx-sf-camapi qnx-sf-camera-usb
-#   + qnx_apis from https://github.com/qnx/python3-qnx-apis (camera)
+#   apk add python3-numpy python3-opencv
 #   + rpi_gpio (ships with the QNX Raspberry Pi image; servos)
 #
-# The stream server uses only the Python standard library.
+# Frames arrive over HTTP from the camera Pi (camera_streamer.py); the HTTP
+# client and the output stream server use only the Python standard library.
 numpy
 opencv-python

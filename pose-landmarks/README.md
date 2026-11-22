@@ -94,6 +94,7 @@ repository root in Windows PowerShell:
 
 ```powershell
 $env:POSE_URL = "http://<pi-ip>:8080/pose"
+$env:POSE_STREAM_HOST = "<pi-ip>"
 python ui\app.py
 ```
 
@@ -102,6 +103,12 @@ run on the same machine. `POSE_URL` can also be set in `telemetry/.env`;
 leave it unset to disable pose polling. The dashboard logs pose feed failures
 and continues without camera data. The feed is unauthenticated: keep it on a
 trusted network rather than exposing it publicly.
+
+`POSE_URL` configures fall detection separately from the dashboard's video
+proxy. The video proxy uses `POSE_STREAM_HOST` (default `localhost`),
+`POSE_STREAM_PORT` (default `8080`) and `POSE_STREAM_SCHEME` (default `http`).
+For the two-Pi setup below, use the QNX tracker's port 8080 for both the pose
+and annotated video feeds, not the camera Pi's raw stream on port 8081.
 
 The Live tab's **Simulate Fall** button tests the warning and browser sound,
 not the camera or watch detection. Enable sound with a click, then dismiss the
@@ -114,17 +121,44 @@ fall is approximately 25 seconds old when inserted, outside the live detector's
 10-second impact window; it is not a live alert test. Do not seed a database
 containing important data.
 
-## Running on QNX 8.0 (Raspberry Pi)
+## Running on QNX 8.0 (Raspberry Pi) with a separate camera Pi
 
-OpenVINO and pigpio don't exist on QNX, and `cv2.VideoCapture` has no camera backend there, so the code picks QNX-friendly backends automatically when `sys.platform` is QNX:
+QNX has no usable webcam path and can't compile packages, so the work is split across two devices:
+
+```
+ Camera Pi (Raspberry Pi OS)                    QNX Pi
+ USB webcam on the pan/tilt gimbal              servos + limit switch
+ src/camera_streamer.py  --- MJPEG/HTTP --->    src/main.py --camera-url http://<camera-pi>:8081/stream
+ capture + JPEG only                            pose model, PID, servos, annotated stream on :8080
+```
+The QNX Pi *pulls* the stream, so the camera Pi just has to be reachable from it on port 8081. The webcam still has to ride on the gimbal so the servos move it.
+
+**Camera Pi (Raspberry Pi OS)**
+```bash
+  python3 -m venv .venv && source .venv/bin/activate
+  pip install -r requirements-camera.txt
+  ./start_camera.sh                      # = python3 src/camera_streamer.py  (options: --camera --port --fps --quality --width --height)
+```
+Check it from any browser: `http://<camera-pi>:8081/`.
+
+**QNX Pi**
+
+On QNX the code picks QNX-friendly backends automatically:
 
 | Part | Raspberry Pi OS / desktop | QNX |
 |---|---|---|
 | Pose model (`--inference`) | OpenVINO | OpenCV DNN (`cv2.dnn`, same ONNX model) |
-| Camera (`--camera-backend`) | `cv2.VideoCapture` | `qnx_apis.VideoCapture` (libcamapi) |
+| Camera | local webcam (`cv2.VideoCapture`) or `--camera-url` | `--camera-url` (required) |
 | Servos (`--io`) | pigpio (`io_control_pigio.py`) | `rpi_gpio` (`io_control_qnx.py`) |
 
-**Rewire the servos.** QNX `rpi_gpio` only drives hardware PWM on GPIO 12, 13, 18 and 19 (12/18 share channel 1, 13/19 share channel 2), so the servos must move off GPIO 17/27:
+Install (nothing is compiled on the Pi; see `requirements-qnx.txt`):
+```bash
+  apk update
+  apk add python3-numpy python3-opencv
+```
+Package names can differ between QNX releases; use `apk search <name>` if one isn't found.
+
+Rewire the servos: QNX `rpi_gpio` only drives hardware PWM on GPIO 12, 13, 18 and 19 (12/18 share channel 1, 13/19 share channel 2), so the servos must move off GPIO 17/27:
 
 | | GPIO | physical pin |
 |---|---|---|
@@ -132,30 +166,20 @@ OpenVINO and pigpio don't exist on QNX, and `cv2.VideoCapture` has no camera bac
 | tilt servo | 13 | 33 |
 | limit switch (unchanged) | 26 | 37 |
 
-**Install packages** (no pip builds needed). See `requirements-qnx.txt`:
-```bash
-  apk update
-  apk add python3-numpy python3-opencv qnx-sf-camapi qnx-sf-camera-usb
-  # build deps for the camera wrapper
-  apk add opencv-dev python3-numpy-dev python3-dev python3-pybind11-dev python3-setuptools
-  git clone --recursive https://github.com/qnx/python3-qnx-apis && cd python3-qnx-apis
-  python setup.py build_ext -j$(nproc) && pip install --break-system-packages .
-```
-Package names can differ between QNX releases; use `apk search <name>` if one isn't found.
-
-**Check and run:**
+Check and run:
 ```bash
   pidin -p rpi_gpio                     # GPIO resource manager must be running
   python3 -c "import cv2; print(cv2.__version__, hasattr(cv2, 'dnn'))"
-  python3 src/main.py --headless --stream
+  CAMERA_URL=http://<camera-pi-ip>:8081/stream ./start.sh
 ```
-The startup log prints the backends in use (`[INFO] backends: servos=qnx camera=qnx inference=opencv`) and the camera frame shape. If the servo travel is off, calibrate `degrees_to_pulsewidth` in `io_control_qnx.py` (500–2500 µs maps to 2.5–12.5 % duty at 50 Hz).
+The startup log prints `[INFO] backends: servos=qnx camera=mjpeg inference=opencv` and `camera stream connected`. If the camera Pi goes away the tracker keeps running and reconnects by itself. Watch the annotated result at `http://<qnx-pi>:8080/`. If the servo travel is off, calibrate `degrees_to_pulsewidth` in `io_control_qnx.py` (500–2500 µs maps to 2.5–12.5 % duty at 50 Hz).
 
+**Testing both halves on one PC:**
+```bash
+  python src/camera_streamer.py --port 8081
+  python src/main.py --mock --inference opencv --camera-url http://localhost:8081/stream --stream
+```
 
-
-
-
-    
 ## Trouble Shooting
 
 I would like to start this section by saying, this is a software as is, meaning we are not going to provide support to it,

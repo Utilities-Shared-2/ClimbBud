@@ -13,10 +13,12 @@ function createDashboard() {
         disabled: false,
         textContent: "",
         listeners: {},
+        attributes: {},
         classList: { toggle() {}, add() {}, remove() {} },
         addEventListener(name, callback) { this.listeners[name] = callback; },
         setAttribute() {},
-        getAttribute() { return "6"; },
+        getAttribute(name) { return name === "r" ? "6" : this.attributes[name] || null; },
+        removeAttribute(name) { delete this.attributes[name]; },
         getBoundingClientRect() { return { width: 400 }; },
         replaceChildren() {},
         appendChild() {},
@@ -176,4 +178,21 @@ test("an older live response cannot clear a newly simulated alert", async () => 
   await oldLive;
   assert.equal(element("fallAlert").hidden, false);
   assert.equal(element("fallReason").textContent, "Simulated fall (demo)");
+});
+
+test("video reconnects after disconnection", async () => {
+  const { context, element } = createDashboard();
+  await settle();
+  const video = element("videoStream");
+  Object.defineProperty(video, "src", {
+    set(value) { this.attributes.src = value; },
+  });
+  vm.runInContext("updateVideoState(true)", context);
+  assert.equal(video.attributes.src, "/video/stream");
+  assert.equal(element("disconnectedMessage").hidden, true);
+  vm.runInContext("updateVideoState(false)", context);
+  assert.equal(video.getAttribute("src"), null);
+  assert.equal(element("disconnectedMessage").hidden, false);
+  vm.runInContext("updateVideoState(true)", context);
+  assert.equal(video.attributes.src, "/video/stream");
 });

@@ -14,6 +14,9 @@ telemetry/.env before starting the dashboard (environment takes precedence):
   FALL_INACTIVITY_REQUIRES_EVENT Require a preceding moderate event (default 1).
   FALL_SIMULATE_ENABLED          Enable the demo endpoint (default 1; 0 disables).
   FLASK_DEBUG                    Enable Flask debug mode (default off).
+  POSE_STREAM_HOST               Video stream server host (default localhost).
+  POSE_STREAM_PORT               Video stream server port (default 8080).
+  POSE_STREAM_SCHEME             Video stream scheme (default http).
 
 On the Live tab, enable sound, click Simulate Fall, then Dismiss. Browsers
 require a user gesture to enable audio. Simulation exercises the alert UI but
@@ -38,8 +41,9 @@ from pathlib import Path
 from urllib.error import URLError
 from urllib.request import urlopen
 
+import requests
 from dotenv import load_dotenv
-from flask import Flask, jsonify, render_template
+from flask import Flask, jsonify, render_template, Response, stream_with_context
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -51,7 +55,6 @@ from telemetry.fall_detection import FallConfig, FallMonitor, PoseSample, pose_s
 load_dotenv(REPO_ROOT / "telemetry" / ".env")
 
 app = Flask(__name__)
-
 
 class PosePoller:
     """Collect recent, distinct pose frames without blocking dashboard requests."""
@@ -133,12 +136,24 @@ pose_poller = (
 if pose_poller is not None:
     threading.Thread(target=pose_poller.run, daemon=True, name="pose-poller").start()
 
+# Pose stream server configuration
+# Set these environment variables to configure where the video stream comes from:
+# - POSE_STREAM_HOST: IP address or hostname of the pose stream server (default: localhost)
+# - POSE_STREAM_PORT: Port of the pose stream server (default: 8080)
+# - POSE_STREAM_SCHEME: http or https (default: http)
+# Example for QNX on subnet: POSE_STREAM_HOST=192.168.50.2 POSE_STREAM_PORT=8080
+POSE_STREAM_HOST = os.getenv("POSE_STREAM_HOST", "localhost")
+POSE_STREAM_PORT = int(os.getenv("POSE_STREAM_PORT", "8080"))
+POSE_STREAM_SCHEME = os.getenv("POSE_STREAM_SCHEME", "http")
+POSE_STREAM_URL = f"{POSE_STREAM_SCHEME}://{POSE_STREAM_HOST}:{POSE_STREAM_PORT}"
+
 state = {
     "recording": False,
     "start": time.time(),
     "elapsed": 0.0,
     "pr": 12.4,          # personal-record time, seconds
     "battery": 87,
+    "stream_connected": False,
 }
 
 # Initialize telemetry database on startup
@@ -199,6 +214,28 @@ atexit.register(cleanup_telemetry)
 init_thread = threading.Thread(target=init_telemetry, daemon=True)
 init_thread.start()
 
+
+def check_stream_connection():
+    """Check if the pose stream server is available."""
+    global state
+    try:
+        response = requests.get(f"{POSE_STREAM_URL}/health", timeout=2)
+        state["stream_connected"] = response.status_code == 200
+    except Exception:
+        state["stream_connected"] = False
+
+
+# Periodically check stream connection
+def stream_check_loop():
+    while True:
+        check_stream_connection()
+        time.sleep(5)
+
+
+stream_check_thread = threading.Thread(target=stream_check_loop, daemon=True)
+stream_check_thread.start()
+check_stream_connection()  # Initial check
+
 # Normalised (0-1) hold positions of the detected route, bottom -> top.
 ROUTE = [(0.38, 0.95), (0.52, 0.80), (0.70, 0.65), (0.62, 0.52),
          (0.78, 0.42), (0.70, 0.30), (0.80, 0.18), (0.76, 0.06)]
@@ -237,13 +274,18 @@ def live():
         return jsonify(
             error=f"Telemetry database dependencies are unavailable: {exc}",
             fall=evaluate_fall([]),
+            stream_connected=state["stream_connected"],
         ), 503
 
     try:
         data = load_live_telemetry()
     except Exception:
         app.logger.exception("Unable to load live telemetry from the database")
-        return jsonify(error="Live telemetry is unavailable.", fall=evaluate_fall([])), 503
+        return jsonify(
+            error="Live telemetry is unavailable.",
+            fall=evaluate_fall([]),
+            stream_connected=state["stream_connected"],
+        ), 503
 
     latest = data["latest"]
     return jsonify(
@@ -257,6 +299,41 @@ def live():
         latest=latest,
         history=data["history"],
         fall=evaluate_fall(data["history"] if latest is not None else []),
+        stream_connected=state["stream_connected"],
+    )
+
+
+@app.route("/video/stream")
+def video_stream():
+    """Proxy the MJPEG stream from the pose server if available."""
+    if not state["stream_connected"]:
+        return Response("Stream disconnected", status=503, mimetype="text/plain")
+
+    req = None
+    try:
+        req = requests.get(f"{POSE_STREAM_URL}/stream", stream=True, timeout=2)
+        req.raise_for_status()
+    except requests.RequestException as exc:
+        if req is not None:
+            req.close()
+        app.logger.warning("Unable to connect to video stream: %s", exc)
+        state["stream_connected"] = False
+        return Response("Stream disconnected", status=503, mimetype="text/plain")
+
+    def generate():
+        try:
+            for chunk in req.iter_content(chunk_size=8192):
+                if chunk:
+                    yield chunk
+        except requests.RequestException as exc:
+            app.logger.warning("Video stream interrupted: %s", exc)
+            state["stream_connected"] = False
+        finally:
+            req.close()
+
+    return Response(
+        stream_with_context(generate()),
+        content_type=req.headers.get("Content-Type", "multipart/x-mixed-replace"),
     )
 
 

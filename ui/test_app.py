@@ -6,11 +6,12 @@ import types
 import unittest
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from urllib.error import URLError
 
+import requests
 from telemetry.fall_detection import FallConfig, FallMonitor, PoseSample
-from ui.app import PosePoller, app, run_dashboard
+from ui.app import PosePoller, app, run_dashboard, state
 
 
 class PosePollerTests(unittest.TestCase):
@@ -209,6 +210,40 @@ class DashboardStartupTests(unittest.TestCase):
             run.assert_called_once_with(host="0.0.0.0", port=5000, debug=True)
 
 
+class VideoStreamTests(unittest.TestCase):
+    def setUp(self):
+        self.client = app.test_client()
+
+    def test_live_includes_stream_status_even_when_telemetry_fails(self):
+        database = types.ModuleType("telemetry.db")
+        database.load_live_telemetry = lambda: (_ for _ in ()).throw(RuntimeError("offline"))
+        with patch.dict(state, {"stream_connected": True}), patch.dict(sys.modules, {"telemetry.db": database}):
+            with self.assertLogs(app.logger, level="ERROR"):
+                response = self.client.get("/api/live")
+        self.assertEqual(response.status_code, 503)
+        self.assertTrue(response.get_json()["stream_connected"])
+
+    def test_stream_route_proxies_and_closes_response(self):
+        upstream = Mock()
+        upstream.headers = {"Content-Type": "multipart/x-mixed-replace; boundary=frame"}
+        upstream.iter_content.return_value = iter([b"frame-data"])
+        with patch.dict(state, {"stream_connected": True}), patch("ui.app.requests.get", return_value=upstream):
+            response = self.client.get("/video/stream", buffered=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, b"frame-data")
+        self.assertEqual(response.content_type, "multipart/x-mixed-replace; boundary=frame")
+        upstream.close.assert_called_once()
+
+    def test_stream_rejects_upstream_failure(self):
+        upstream = Mock()
+        upstream.raise_for_status.side_effect = requests.HTTPError("upstream error")
+        with patch.dict(state, {"stream_connected": True}), patch("ui.app.requests.get", return_value=upstream):
+            with self.assertLogs(app.logger, level="WARNING"):
+                response = self.client.get("/video/stream")
+        self.assertEqual(response.status_code, 503)
+        upstream.close.assert_called_once()
+
+
 class StatsApiTests(unittest.TestCase):
     def setUp(self):
         self.client = app.test_client()
@@ -254,6 +289,7 @@ class StatsApiTests(unittest.TestCase):
         self.assertEqual(payload["intensity"], 0.7)
         self.assertEqual(payload["session"]["id"], 8)
         self.assertEqual(payload["history"], live_data["history"])
+        self.assertIsInstance(payload["stream_connected"], bool)
 
     def test_stats_api_returns_aggregate_cards_and_session_metrics(self):
         database = types.ModuleType("telemetry.db")

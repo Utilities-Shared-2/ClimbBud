@@ -198,6 +198,7 @@ async function fetchLive() {
     if (request < lastLiveResponse) return;
     lastLiveResponse = request;
     if (!fallActionPending && version === fallVersion) showFall(data.fall);
+    if (typeof data.stream_connected === "boolean") updateVideoState(data.stream_connected);
     if (!response.ok) throw new Error(data.error || `Live API returned ${response.status}`);
     liveError.hidden = true;
 
@@ -225,6 +226,29 @@ async function fetchLive() {
       liveError.hidden = false;
     }
   }
+}
+
+function updateVideoState(connected) {
+  const videoContainer = document.getElementById("videoContainer");
+  const disconnectedMessage = document.getElementById("disconnectedMessage");
+  const videoStream = document.getElementById("videoStream");
+
+  if (connected) {
+    videoContainer.hidden = false;
+    disconnectedMessage.hidden = true;
+    // Only set src if not already set to avoid re-loading
+    if (!videoStream.getAttribute("src")) {
+      videoStream.src = "/video/stream";
+    }
+  } else {
+    videoContainer.hidden = true;
+    disconnectedMessage.hidden = false;
+    videoStream.removeAttribute("src");
+  }
+}
+
+function handleVideoError() {
+  updateVideoState(false);
 }
 
 async function fetchStats() {

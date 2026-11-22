@@ -5,6 +5,7 @@ import os
 import sqlite3
 import threading
 import time
+from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -25,6 +26,7 @@ WATCH_LOG_PATH = Path(__file__).resolve().parent / "watch_log.jsonl"
 
 FLUSH_INTERVAL_SEC = 1.0
 MAX_BATCH_SIZE = 20
+LIVE_TELEMETRY_MAX_AGE_SEC = 5.0
 
 
 class TelemetryDatabase:
@@ -430,6 +432,141 @@ def _read_sqlite_watch_data() -> tuple[list[dict[str, Any]], dict[int, str]]:
         ],
         latest_summaries,
     )
+
+
+def _read_postgres_live_telemetry(limit: int) -> dict[str, Any]:
+    import psycopg
+
+    with psycopg.connect(TIGER_DATA_URL, connect_timeout=5) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT time, session_id, bpm, accel_g, speed, fall_detected
+                FROM telemetry_points
+                WHERE source = 'watch'
+                ORDER BY time DESC
+                LIMIT %s;
+                """,
+                (limit,),
+            )
+            rows = cur.fetchall()
+
+            session = None
+            if rows and rows[0][1] is not None:
+                cur.execute(
+                    """
+                    SELECT id, status, started_at, ended_at
+                    FROM sessions
+                    WHERE id = %s;
+                    """,
+                    (rows[0][1],),
+                )
+                session_row = cur.fetchone()
+                if session_row:
+                    session = {
+                        "id": session_row[0],
+                        "status": session_row[1],
+                        "started_at": session_row[2].isoformat() if session_row[2] else None,
+                        "ended_at": session_row[3].isoformat() if session_row[3] else None,
+                    }
+
+    history = [
+        {
+            "time": row[0].isoformat(),
+            "bpm": row[2],
+            "accel_g": row[3],
+            "speed": row[4],
+            "fall_detected": row[5],
+        }
+        for row in reversed(rows)
+    ]
+    latest = history[-1] if history else None
+    if latest and not _is_fresh_live_sample(latest):
+        latest = None
+    return {
+        "session": session,
+        "latest": latest,
+        "history": history,
+    }
+
+
+def _read_sqlite_live_telemetry(limit: int) -> dict[str, Any]:
+    with closing(
+        sqlite3.connect(f"{SQLITE_DB_PATH.resolve().as_uri()}?mode=ro", uri=True)
+    ) as conn:
+        rows = conn.execute(
+            """
+            SELECT time, session_id, bpm, accel_g, speed, fall_detected
+            FROM telemetry_points
+            WHERE source = 'watch'
+            ORDER BY time DESC
+            LIMIT ?;
+            """,
+            (limit,),
+        ).fetchall()
+        session_row = None
+        if rows and rows[0][1] is not None:
+            session_row = conn.execute(
+                """
+                SELECT id, status, started_at, ended_at
+                FROM sessions
+                WHERE id = ?;
+                """,
+                (rows[0][1],),
+            ).fetchone()
+
+    history = [
+        {
+            "time": row[0],
+            "bpm": row[2],
+            "accel_g": row[3],
+            "speed": row[4],
+            "fall_detected": bool(row[5]) if row[5] is not None else None,
+        }
+        for row in reversed(rows)
+    ]
+    latest = history[-1] if history else None
+    if latest and not _is_fresh_live_sample(latest):
+        latest = None
+    session = (
+        {
+            "id": session_row[0],
+            "status": session_row[1],
+            "started_at": session_row[2],
+            "ended_at": session_row[3],
+        }
+        if session_row
+        else None
+    )
+    return {
+        "session": session,
+        "latest": latest,
+        "history": history,
+    }
+
+
+def _is_fresh_live_sample(point: dict[str, Any]) -> bool:
+    sample_time = timestamp_epoch(point.get("time"))
+    if sample_time is None:
+        return False
+    age = time.time() - sample_time
+    return 0 <= age <= LIVE_TELEMETRY_MAX_AGE_SEC
+
+
+def load_live_telemetry(limit: int = 60) -> dict[str, Any]:
+    """Load the selected session and its newest telemetry, preferring Postgres."""
+    if limit < 1:
+        raise ValueError("limit must be at least 1")
+
+    if TIGER_DATA_URL:
+        try:
+            data = _read_postgres_live_telemetry(limit)
+            if data["history"]:
+                return data
+        except Exception as exc:
+            print(f"[DB] Unable to read live Tiger Data telemetry ({exc}); trying local SQLite.")
+
+    return _read_sqlite_live_telemetry(limit)
 
 
 def _read_watch_log() -> list[dict[str, Any]]:

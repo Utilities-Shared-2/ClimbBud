@@ -28,6 +28,31 @@ class StatsApiTests(unittest.TestCase):
             "_points": [],
         }
 
+    def test_live_api_returns_database_telemetry(self):
+        live_data = {
+            "session": {"id": 8, "status": "ACTIVE"},
+            "latest": {
+                "time": "2026-01-01T00:00:02+00:00",
+                "bpm": 126,
+                "accel_g": 1.1,
+                "speed": 0.7,
+                "fall_detected": False,
+            },
+            "history": [{"bpm": 120}, {"bpm": 126}],
+        }
+        database = types.ModuleType("telemetry.db")
+        database.load_live_telemetry = lambda: live_data
+
+        with patch.dict(sys.modules, {"telemetry.db": database}):
+            response = self.client.get("/api/live")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertEqual(payload["bpm"], 126)
+        self.assertEqual(payload["intensity"], 0.7)
+        self.assertEqual(payload["session"]["id"], 8)
+        self.assertEqual(payload["history"], live_data["history"])
+
     def test_stats_api_returns_aggregate_cards_and_session_metrics(self):
         database = types.ModuleType("telemetry.db")
         database.load_watch_sessions = lambda: {

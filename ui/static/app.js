@@ -70,6 +70,9 @@ async function fetchLive() {
     document.getElementById("recText").textContent = recording ? "Recording…" : "Paused";
     document.getElementById("recBtn").classList.toggle("off", !recording);
 
+    // Handle video stream connection status
+    updateVideoState(data.stream_connected);
+
     if (recording) {
       intensityHistory.push(Math.max(0, Math.min(1, data.intensity)));
       if (intensityHistory.length > 50) intensityHistory.shift();
@@ -78,6 +81,29 @@ async function fetchLive() {
   } catch (error) {
     console.error(error);
   }
+}
+
+function updateVideoState(connected) {
+  const videoContainer = document.getElementById("videoContainer");
+  const disconnectedMessage = document.getElementById("disconnectedMessage");
+  const videoStream = document.getElementById("videoStream");
+
+  if (connected) {
+    videoContainer.hidden = false;
+    disconnectedMessage.hidden = true;
+    // Only set src if not already set to avoid re-loading
+    if (!videoStream.src || videoStream.src === "") {
+      videoStream.src = "/video/stream";
+    }
+  } else {
+    videoContainer.hidden = true;
+    disconnectedMessage.hidden = false;
+    videoStream.src = "";
+  }
+}
+
+function handleVideoError() {
+  updateVideoState(false);
 }
 
 async function fetchStats() {

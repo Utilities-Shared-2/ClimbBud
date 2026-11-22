@@ -15,8 +15,9 @@ import threading
 import time
 from pathlib import Path
 
+import requests
 from dotenv import load_dotenv
-from flask import Flask, jsonify, render_template
+from flask import Flask, jsonify, render_template, Response, stream_with_context
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -27,12 +28,24 @@ load_dotenv(REPO_ROOT / "telemetry" / ".env")
 
 app = Flask(__name__)
 
+# Pose stream server configuration
+# Set these environment variables to configure where the video stream comes from:
+# - POSE_STREAM_HOST: IP address or hostname of the pose stream server (default: localhost)
+# - POSE_STREAM_PORT: Port of the pose stream server (default: 8080)
+# - POSE_STREAM_SCHEME: http or https (default: http)
+# Example for QNX on subnet: POSE_STREAM_HOST=192.168.50.2 POSE_STREAM_PORT=8080
+POSE_STREAM_HOST = os.getenv("POSE_STREAM_HOST", "localhost")
+POSE_STREAM_PORT = int(os.getenv("POSE_STREAM_PORT", "8080"))
+POSE_STREAM_SCHEME = os.getenv("POSE_STREAM_SCHEME", "http")
+POSE_STREAM_URL = f"{POSE_STREAM_SCHEME}://{POSE_STREAM_HOST}:{POSE_STREAM_PORT}"
+
 state = {
     "recording": False,
     "start": time.time(),
     "elapsed": 0.0,
     "pr": 12.4,          # personal-record time, seconds
     "battery": 87,
+    "stream_connected": False,
 }
 
 # Initialize telemetry database on startup
@@ -93,6 +106,28 @@ atexit.register(cleanup_telemetry)
 init_thread = threading.Thread(target=init_telemetry, daemon=True)
 init_thread.start()
 
+
+def check_stream_connection():
+    """Check if the pose stream server is available."""
+    global state
+    try:
+        response = requests.get(f"{POSE_STREAM_URL}/health", timeout=2)
+        state["stream_connected"] = response.status_code == 200
+    except Exception:
+        state["stream_connected"] = False
+
+
+# Periodically check stream connection
+def stream_check_loop():
+    while True:
+        check_stream_connection()
+        time.sleep(5)
+
+
+stream_check_thread = threading.Thread(target=stream_check_loop, daemon=True)
+stream_check_thread.start()
+check_stream_connection()  # Initial check
+
 # Normalised (0-1) hold positions of the detected route, bottom -> top.
 ROUTE = [(0.38, 0.95), (0.52, 0.80), (0.70, 0.65), (0.62, 0.52),
          (0.78, 0.42), (0.70, 0.30), (0.80, 0.18), (0.76, 0.06)]
@@ -124,7 +159,26 @@ def index():
 def live():
     data = read_sensors()
     return jsonify(**data, pr=state["pr"], battery=state["battery"],
-                   recording=state["recording"])
+                   recording=state["recording"], stream_connected=state["stream_connected"])
+
+
+@app.route("/video/stream")
+def video_stream():
+    """Proxy the MJPEG stream from the pose server if available."""
+    if not state["stream_connected"]:
+        return Response("Stream disconnected", status=503, mimetype="text/plain")
+
+    try:
+        req = requests.get(f"{POSE_STREAM_URL}/stream", stream=True, timeout=2)
+        def generate():
+            for chunk in req.iter_content(chunk_size=8192):
+                if chunk:
+                    yield chunk
+        return Response(stream_with_context(generate()), mimetype=req.headers.get("Content-Type", "multipart/x-mixed-replace"))
+    except Exception as e:
+        print(f"[UI] Error proxying video stream: {e}")
+        state["stream_connected"] = False
+        return Response("Stream disconnected", status=503, mimetype="text/plain")
 
 
 @app.route("/api/recording/toggle", methods=["POST"])

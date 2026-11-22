@@ -50,6 +50,9 @@ body.fall-alert-active .board{border-color:#b73c50}
 .cam svg{position:absolute;inset:0;width:100%;height:100%}
 .video-container{position:absolute;inset:0;width:100%;height:100%;background:#000;z-index:1}
 .video-container img{width:100%;height:100%;object-fit:cover}
+#poseOverlay{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:2}
+/* raw camera feed is un-mirrored; flip video + overlay together like the annotated view */
+.video-container.mirrored img,.video-container.mirrored #poseOverlay{transform:scaleX(-1)}
 .disconnected-message{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;color:var(--muted);font-size:1rem;background:rgba(10,10,28,0.85);z-index:2}
 .disconnected-message[hidden]{display:none}
 .disconnected-message svg{width:48px;height:48px;opacity:0.6}

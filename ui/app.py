@@ -17,6 +17,22 @@ telemetry/.env before starting the dashboard (environment takes precedence):
   POSE_STREAM_HOST               Video stream server host (default localhost).
   POSE_STREAM_PORT               Video stream server port (default 8080).
   POSE_STREAM_SCHEME             Video stream scheme (default http).
+  CAMERA_STREAM_URL              Raw camera MJPEG URL, e.g.
+                                 http://camera-pi.local:8081/stream. When set and
+                                 reachable, the Live tab plays this feed at the
+                                 camera's frame rate and draws the pose skeleton
+                                 client-side, interpolated between the (slow) pose
+                                 updates. Empty = show the annotated pose stream.
+                                 Also the source the session video is recorded from.
+  RECORDINGS_DIR                 Where session video + pose logs are saved
+                                 (default <repo>/recordings).
+  MQTT_BROKER_IP / _PORT         Broker carrying climbbud/control/session. START/STOP
+                                 there (voice Pi, dashboard button) starts/stops the
+                                 health-stats session and the video recording.
+  UI_TELEMETRY_WORKER            Run the telemetry DB worker inside the dashboard
+                                 (default 1). Set 0 when telemetry/db.py runs as its
+                                 own process on the same broker, or every START
+                                 creates two DB sessions.
 
 On the Live tab, enable sound, click Simulate Fall, then Dismiss. Browsers
 require a user gesture to enable audio. Simulation exercises the alert UI but
@@ -39,6 +55,7 @@ import time
 from collections import deque
 from pathlib import Path
 from urllib.error import URLError
+from urllib.parse import urlsplit
 from urllib.request import urlopen
 
 import requests
@@ -50,6 +67,8 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from telemetry.fall_detection import FallConfig, FallMonitor, PoseSample, pose_sample_from_payload
+from telemetry.db import CONTROL_TOPIC, parse_session_command  # stdlib-only at import time
+from ui.session_recorder import SessionRecorder
 
 # Load environment variables from telemetry/.env
 load_dotenv(REPO_ROOT / "telemetry" / ".env")
@@ -146,6 +165,17 @@ POSE_STREAM_HOST = os.getenv("POSE_STREAM_HOST", "localhost")
 POSE_STREAM_PORT = int(os.getenv("POSE_STREAM_PORT", "8080"))
 POSE_STREAM_SCHEME = os.getenv("POSE_STREAM_SCHEME", "http")
 POSE_STREAM_URL = f"{POSE_STREAM_SCHEME}://{POSE_STREAM_HOST}:{POSE_STREAM_PORT}"
+CAMERA_STREAM_URL = os.getenv("CAMERA_STREAM_URL", "").strip()
+
+RECORDINGS_DIR = Path(os.getenv("RECORDINGS_DIR", "").strip() or REPO_ROOT / "recordings")
+MQTT_BROKER_IP = os.getenv("MQTT_BROKER_IP", "127.0.0.1")
+MQTT_BROKER_PORT = int(os.getenv("MQTT_BROKER_PORT", "1883"))
+UI_TELEMETRY_WORKER = os.getenv("UI_TELEMETRY_WORKER", "1").strip().lower() not in {"0", "false", "no", "off"}
+
+session_recorder = SessionRecorder(CAMERA_STREAM_URL, f"{POSE_STREAM_URL}/pose", RECORDINGS_DIR)
+
+# Only these /pose fields are forwarded to the browser overlay.
+POSE_OVERLAY_FIELDS = ("timestamp", "enabled", "detected", "frame_shape", "keypoints")
 
 state = {
     "recording": False,
@@ -154,6 +184,7 @@ state = {
     "pr": 12.4,          # personal-record time, seconds
     "battery": 87,
     "stream_connected": False,
+    "camera_connected": False,
 }
 
 # Initialize telemetry database on startup
@@ -163,6 +194,16 @@ mqtt_client = None
 def cleanup_telemetry():
     """Cleanup telemetry resources on shutdown."""
     global mqtt_client, telemetry_db
+    try:
+        session_recorder.stop()  # finalize the AVI header if a session is still recording
+    except Exception as exc:
+        print(f"[UI] Error stopping session recorder: {exc}")
+    if control_client:
+        try:
+            control_client.loop_stop()
+            control_client.disconnect()
+        except Exception:
+            pass
     if mqtt_client:
         try:
             mqtt_client.loop_stop()
@@ -207,12 +248,106 @@ def init_telemetry():
     except Exception as exc:
         print(f"[UI] Failed to initialize telemetry: {exc}")
 
+# ---------------------------------------------------------------------------
+# Session control: MQTT climbbud/control/session is the single source of truth.
+# The voice Pi (and the dashboard button) publish START/STOP there; the
+# telemetry worker starts the DB session and this subscriber starts the
+# dashboard timer + video/pose recording, wherever telemetry happens to run.
+# ---------------------------------------------------------------------------
+control_client = None
+_control_connected = threading.Event()
+_session_lock = threading.Lock()
+
+
+def on_session_command(command):
+    """Apply a START/STOP: dashboard recording state + video/pose recorder."""
+    with _session_lock:
+        now = time.time()
+        if command == "START":
+            if state["recording"]:
+                state["elapsed"] += now - state["start"]
+            state["recording"] = True
+            state["start"] = now
+            session_recorder.start()
+            threading.Thread(target=_attach_db_session_id, daemon=True).start()
+        elif command == "STOP":
+            if state["recording"]:
+                state["elapsed"] += now - state["start"]
+            state["recording"] = False
+            state["start"] = now
+            session_recorder.stop()
+
+
+def _attach_db_session_id(timeout=3.0):
+    """If telemetry runs in this process, note its session id in the recording's meta.json."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        db = telemetry_db
+        if db is not None and db.active_session_id is not None:
+            session_recorder.annotate("db_session_id", db.active_session_id)
+            return
+        time.sleep(0.1)
+
+
+def start_control_client():
+    """Subscribe to the session control topic (independent of the telemetry worker)."""
+    global control_client
+    try:
+        import paho.mqtt.client as mqtt
+    except ImportError as exc:
+        print(f"[UI] paho-mqtt unavailable, session control only via the button: {exc}")
+        return None
+
+    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=f"climbbud-ui-control-{os.getpid()}")
+
+    def on_connect(c, _userdata, _flags, reason_code, _properties=None):
+        c.subscribe(CONTROL_TOPIC, qos=1)
+        _control_connected.set()
+        print(f"[UI] Session control subscribed on {MQTT_BROKER_IP}:{MQTT_BROKER_PORT} (rc={reason_code})")
+
+    def on_disconnect(_c, _userdata, _flags, _reason_code, _properties=None):
+        _control_connected.clear()
+
+    def on_message(_c, _userdata, msg):
+        command = parse_session_command(msg.payload.decode("utf-8", errors="replace"))
+        if command:
+            on_session_command(command)
+
+    client.on_connect = on_connect
+    client.on_disconnect = on_disconnect
+    client.on_message = on_message
+    client.reconnect_delay_set(min_delay=1, max_delay=10)
+    try:
+        client.connect_async(MQTT_BROKER_IP, MQTT_BROKER_PORT, keepalive=30)
+        client.loop_start()
+    except Exception as exc:
+        print(f"[UI] Session control MQTT setup failed: {exc}")
+        return None
+    control_client = client
+    return client
+
+
+def publish_session_command(command):
+    """Publish START/STOP for everyone (telemetry + this dashboard). False if the broker is unreachable."""
+    if control_client is None or not _control_connected.is_set():
+        return False
+    payload = json.dumps({"command": command, "source": "dashboard", "ts": time.time()})
+    try:
+        info = control_client.publish(CONTROL_TOPIC, payload, qos=1)
+    except Exception as exc:
+        app.logger.warning("Unable to publish session command: %s", exc)
+        return False
+    return info.rc == 0
+
+
 # Register cleanup handler
 atexit.register(cleanup_telemetry)
 
-# Start telemetry in background
-init_thread = threading.Thread(target=init_telemetry, daemon=True)
-init_thread.start()
+# Start telemetry in background (skip when telemetry/db.py runs as its own worker)
+if UI_TELEMETRY_WORKER:
+    init_thread = threading.Thread(target=init_telemetry, daemon=True)
+    init_thread.start()
+start_control_client()
 
 
 def check_stream_connection():
@@ -223,6 +358,32 @@ def check_stream_connection():
         state["stream_connected"] = response.status_code == 200
     except Exception:
         state["stream_connected"] = False
+    state["camera_connected"] = check_camera_connection()
+
+
+def camera_base_url(stream_url):
+    """http://host:8081/stream -> http://host:8081 (camera_streamer serves /health there)."""
+    parts = urlsplit(stream_url)
+    return f"{parts.scheme}://{parts.netloc}"
+
+
+def check_camera_connection():
+    if not CAMERA_STREAM_URL:
+        return False
+    try:
+        response = requests.get(f"{camera_base_url(CAMERA_STREAM_URL)}/health", timeout=2)
+        return response.status_code == 200
+    except Exception:
+        return False
+
+
+def video_source():
+    """Which feed the Live tab should play: raw camera + overlay, annotated pose stream, or none."""
+    if CAMERA_STREAM_URL and state["camera_connected"]:
+        return "raw"
+    if state["stream_connected"]:
+        return "annotated"
+    return None
 
 
 # Periodically check stream connection
@@ -275,6 +436,7 @@ def live():
             error=f"Telemetry database dependencies are unavailable: {exc}",
             fall=evaluate_fall([]),
             stream_connected=state["stream_connected"],
+            video_source=video_source(),
         ), 503
 
     try:
@@ -285,6 +447,7 @@ def live():
             error="Live telemetry is unavailable.",
             fall=evaluate_fall([]),
             stream_connected=state["stream_connected"],
+            video_source=video_source(),
         ), 503
 
     latest = data["latest"]
@@ -300,24 +463,25 @@ def live():
         history=data["history"],
         fall=evaluate_fall(data["history"] if latest is not None else []),
         stream_connected=state["stream_connected"],
+        video_source=video_source(),
+        video_recording=session_recorder.status(),
     )
 
 
-@app.route("/video/stream")
-def video_stream():
-    """Proxy the MJPEG stream from the pose server if available."""
-    if not state["stream_connected"]:
+def _proxy_mjpeg(url, state_key):
+    """Proxy an upstream MJPEG stream; on failure mark state[state_key] disconnected."""
+    if not state[state_key]:
         return Response("Stream disconnected", status=503, mimetype="text/plain")
 
     req = None
     try:
-        req = requests.get(f"{POSE_STREAM_URL}/stream", stream=True, timeout=2)
+        req = requests.get(url, stream=True, timeout=2)
         req.raise_for_status()
     except requests.RequestException as exc:
         if req is not None:
             req.close()
         app.logger.warning("Unable to connect to video stream: %s", exc)
-        state["stream_connected"] = False
+        state[state_key] = False
         return Response("Stream disconnected", status=503, mimetype="text/plain")
 
     def generate():
@@ -327,7 +491,7 @@ def video_stream():
                     yield chunk
         except requests.RequestException as exc:
             app.logger.warning("Video stream interrupted: %s", exc)
-            state["stream_connected"] = False
+            state[state_key] = False
         finally:
             req.close()
 
@@ -335,6 +499,34 @@ def video_stream():
         stream_with_context(generate()),
         content_type=req.headers.get("Content-Type", "multipart/x-mixed-replace"),
     )
+
+
+@app.route("/video/stream")
+def video_stream():
+    """Proxy the annotated MJPEG stream from the pose server if available."""
+    return _proxy_mjpeg(f"{POSE_STREAM_URL}/stream", "stream_connected")
+
+
+@app.route("/video/raw")
+def video_raw():
+    """Proxy the raw camera MJPEG (full camera frame rate) if CAMERA_STREAM_URL is set."""
+    if not CAMERA_STREAM_URL:
+        return Response("Camera stream not configured", status=503, mimetype="text/plain")
+    return _proxy_mjpeg(CAMERA_STREAM_URL, "camera_connected")
+
+
+@app.route("/api/pose")
+def pose_overlay():
+    """Latest keypoints from the pose server, trimmed to what the browser overlay draws."""
+    try:
+        response = requests.get(f"{POSE_STREAM_URL}/pose", timeout=1)
+        response.raise_for_status()
+        payload = response.json()
+    except (requests.RequestException, ValueError):
+        return jsonify(error="Pose data unavailable."), 503
+    if not isinstance(payload, dict):
+        return jsonify(error="Pose data unavailable."), 503
+    return jsonify({key: payload.get(key) for key in POSE_OVERLAY_FIELDS})
 
 
 @app.route("/api/fall/dismiss", methods=["POST"])
@@ -351,22 +543,22 @@ def simulate_fall():
 
 @app.route("/api/recording/toggle", methods=["POST"])
 def toggle():
-    global telemetry_db
-    now = time.time()
-    
-    if state["recording"]:
-        # Stop recording
-        state["elapsed"] += now - state["start"]
-        if telemetry_db:
-            telemetry_db.stop_session()
-        state["recording"] = False
-    else:
-        # Start recording
-        if telemetry_db:
+    command = "STOP" if state["recording"] else "START"
+    expected = command == "START"
+    if publish_session_command(command):
+        # Our own control subscription applies it; give it a moment so the reply is current.
+        deadline = time.time() + 1.0
+        while state["recording"] != expected and time.time() < deadline:
+            time.sleep(0.02)
+        return jsonify(recording=expected, elapsed=read_elapsed())
+
+    # Broker unreachable: drive the session directly so the button still works offline.
+    if telemetry_db:
+        if expected:
             telemetry_db.start_session()
-        state["recording"] = True
-    
-    state["start"] = now
+        else:
+            telemetry_db.stop_session()
+    on_session_command(command)
     return jsonify(recording=state["recording"], elapsed=read_elapsed())
 
 

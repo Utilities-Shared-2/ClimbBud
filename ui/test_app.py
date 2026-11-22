@@ -2,6 +2,7 @@ import io
 import json
 import sys
 import threading
+import time
 import types
 import unittest
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -242,6 +243,133 @@ class VideoStreamTests(unittest.TestCase):
                 response = self.client.get("/video/stream")
         self.assertEqual(response.status_code, 503)
         upstream.close.assert_called_once()
+
+    def test_raw_route_unconfigured_returns_503(self):
+        with patch("ui.app.CAMERA_STREAM_URL", ""), patch("ui.app.requests.get") as get:
+            response = self.client.get("/video/raw")
+        self.assertEqual(response.status_code, 503)
+        get.assert_not_called()
+
+    def test_raw_route_proxies_camera_stream(self):
+        upstream = Mock()
+        upstream.headers = {"Content-Type": "multipart/x-mixed-replace; boundary=frame"}
+        upstream.iter_content.return_value = iter([b"raw-frame"])
+        url = "http://camera-pi:8081/stream"
+        with patch("ui.app.CAMERA_STREAM_URL", url), patch.dict(state, {"camera_connected": True}), \
+                patch("ui.app.requests.get", return_value=upstream) as get:
+            response = self.client.get("/video/raw", buffered=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, b"raw-frame")
+        self.assertEqual(get.call_args.args[0], url)
+        upstream.close.assert_called_once()
+
+    def test_raw_route_marks_camera_down_on_failure(self):
+        with patch("ui.app.CAMERA_STREAM_URL", "http://camera-pi:8081/stream"), \
+                patch.dict(state, {"camera_connected": True}), \
+                patch("ui.app.requests.get", side_effect=requests.ConnectionError("down")):
+            with self.assertLogs(app.logger, level="WARNING"):
+                response = self.client.get("/video/raw")
+            self.assertEqual(response.status_code, 503)
+            self.assertFalse(state["camera_connected"])
+
+    def test_pose_api_forwards_only_overlay_fields(self):
+        upstream = Mock()
+        upstream.json.return_value = {
+            "timestamp": 12.5, "enabled": True, "detected": True, "frame_shape": [480, 640],
+            "keypoints": {"nose": {"x": 1, "y": 2, "conf": 0.9, "visible": True}},
+            "pan": 135, "body": {"center": [1, 2]},
+        }
+        with patch("ui.app.requests.get", return_value=upstream) as get:
+            response = self.client.get("/api/pose")
+        self.assertEqual(response.status_code, 200)
+        from ui.app import POSE_STREAM_URL
+        self.assertEqual(get.call_args.args[0], f"{POSE_STREAM_URL}/pose")
+        self.assertEqual(set(response.get_json()),
+                         {"timestamp", "enabled", "detected", "frame_shape", "keypoints"})
+
+    def test_pose_api_503_when_pose_server_down(self):
+        with patch("ui.app.requests.get", side_effect=requests.ConnectionError("down")):
+            self.assertEqual(self.client.get("/api/pose").status_code, 503)
+        bad = Mock()
+        bad.json.side_effect = ValueError("not json")
+        with patch("ui.app.requests.get", return_value=bad):
+            self.assertEqual(self.client.get("/api/pose").status_code, 503)
+
+    def test_video_source_prefers_raw_camera(self):
+        from ui.app import video_source
+        cases = [
+            ("http://cam:8081/stream", True, True, "raw"),
+            ("http://cam:8081/stream", False, True, "annotated"),
+            ("", True, True, "annotated"),
+            ("", False, False, None),
+        ]
+        for url, camera, stream, expected in cases:
+            with patch("ui.app.CAMERA_STREAM_URL", url), \
+                    patch.dict(state, {"camera_connected": camera, "stream_connected": stream}):
+                self.assertEqual(video_source(), expected, (url, camera, stream))
+
+    def test_camera_base_url(self):
+        from ui.app import camera_base_url
+        self.assertEqual(camera_base_url("http://camera-pi.local:8081/stream"), "http://camera-pi.local:8081")
+
+
+class SessionControlTests(unittest.TestCase):
+    def setUp(self):
+        self.client = app.test_client()
+        self.recorder = Mock()
+        self.recorder.status.return_value = {"active": False}
+        patcher = patch("ui.app.session_recorder", self.recorder)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.state = patch.dict(state, {"recording": False, "elapsed": 0.0, "start": time.time()})
+        self.state.start()
+        self.addCleanup(self.state.stop)
+
+    def test_start_and_stop_drive_state_and_recorder(self):
+        from ui.app import on_session_command
+        with patch("ui.app.threading.Thread"):
+            on_session_command("START")
+        self.assertTrue(state["recording"])
+        self.recorder.start.assert_called_once()
+        on_session_command("STOP")
+        self.assertFalse(state["recording"])
+        self.recorder.stop.assert_called_once()
+        self.assertGreaterEqual(state["elapsed"], 0)
+
+    def test_toggle_publishes_command_on_control_topic(self):
+        client = Mock()
+        client.publish.return_value = SimpleNamespace(rc=0)
+
+        def deliver(topic, payload, qos):
+            from ui.app import on_session_command, parse_session_command
+            on_session_command(parse_session_command(payload))  # broker echoes to our subscription
+            return SimpleNamespace(rc=0)
+
+        client.publish.side_effect = deliver
+        connected = threading.Event()
+        connected.set()
+        with patch("ui.app.control_client", client), patch("ui.app._control_connected", connected), \
+                patch("ui.app.threading.Thread"):
+            response = self.client.post("/api/recording/toggle")
+        self.assertTrue(response.get_json()["recording"])
+        topic, payload = client.publish.call_args.args[:2]
+        self.assertEqual(topic, "climbbud/control/session")
+        self.assertEqual(json.loads(payload)["command"], "START")
+        self.assertEqual(json.loads(payload)["source"], "dashboard")
+        self.recorder.start.assert_called_once()
+
+    def test_toggle_falls_back_when_broker_unreachable(self):
+        db = Mock()
+        with patch("ui.app.control_client", None), patch("ui.app.telemetry_db", db), \
+                patch("ui.app.threading.Thread"):
+            response = self.client.post("/api/recording/toggle")
+            self.assertTrue(response.get_json()["recording"])
+            db.start_session.assert_called_once()
+            self.recorder.start.assert_called_once()
+            response = self.client.post("/api/recording/toggle")
+        self.assertFalse(response.get_json()["recording"])
+        db.stop_session.assert_called_once()
+        self.recorder.stop.assert_called_once()
 
 
 class StatsApiTests(unittest.TestCase):

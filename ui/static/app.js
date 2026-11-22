@@ -198,7 +198,8 @@ async function fetchLive() {
     if (request < lastLiveResponse) return;
     lastLiveResponse = request;
     if (!fallActionPending && version === fallVersion) showFall(data.fall);
-    if (typeof data.stream_connected === "boolean") updateVideoState(data.stream_connected);
+    if ("video_source" in data) updateVideoState(data.video_source);
+    else if (typeof data.stream_connected === "boolean") updateVideoState(data.stream_connected);
     if (!response.ok) throw new Error(data.error || `Live API returned ${response.status}`);
     liveError.hidden = true;
 
@@ -228,17 +229,42 @@ async function fetchLive() {
   }
 }
 
-function updateVideoState(connected) {
+// "raw": camera feed at full frame rate + client-side interpolated pose overlay.
+// "annotated" (or true): the pose server's own annotated stream (~inference fps).
+// null / false: disconnected.
+const VIDEO_SOURCES = { raw: "/video/raw", annotated: "/video/stream" };
+let currentVideoSource = null;
+let poseOverlay = null;
+
+function setPoseOverlay(active) {
+  if (active && !poseOverlay && window.PoseOverlay) {
+    poseOverlay = window.PoseOverlay.createOverlay({
+      canvas: document.getElementById("poseOverlay"),
+      img: document.getElementById("videoStream"),
+    });
+  }
+  if (!poseOverlay) return;
+  if (active) poseOverlay.start();
+  else poseOverlay.stop();
+}
+
+function updateVideoState(source) {
+  if (source === true) source = "annotated";
+  if (!VIDEO_SOURCES[source]) source = null;
   const videoContainer = document.getElementById("videoContainer");
   const disconnectedMessage = document.getElementById("disconnectedMessage");
   const videoStream = document.getElementById("videoStream");
+  const changed = source !== currentVideoSource;
+  currentVideoSource = source;
 
-  if (connected) {
+  videoContainer.classList.toggle("mirrored", source === "raw");
+  setPoseOverlay(source === "raw");
+  if (source) {
     videoContainer.hidden = false;
     disconnectedMessage.hidden = true;
-    // Only set src if not already set to avoid re-loading
-    if (!videoStream.getAttribute("src")) {
-      videoStream.src = "/video/stream";
+    // Only set src when the source changes (or was dropped) to avoid re-loading
+    if (changed || !videoStream.getAttribute("src")) {
+      videoStream.src = VIDEO_SOURCES[source];
     }
   } else {
     videoContainer.hidden = true;

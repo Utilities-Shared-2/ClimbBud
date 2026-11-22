@@ -726,6 +726,29 @@ def persist_unassigned_postgres_session(session: dict[str, Any]) -> int:
     return session_id
 
 
+CONTROL_TOPIC = "climbbud/control/session"
+
+
+def parse_session_command(raw_payload: str) -> str | None:
+    """Session control payload -> "START" / "STOP" / None.
+
+    Accepts raw "START"/"STOP" strings (any case) or JSON {"command": ...} / {"action": ...}.
+    Shared by the telemetry worker and the dashboard's video recorder so both
+    interpret messages identically.
+    """
+    command = raw_payload.strip()
+    if command.startswith("{"):
+        try:
+            data = json.loads(command)
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(data, dict):
+            return None
+        command = str(data.get("command") or data.get("action") or "")
+    command = command.strip().upper()
+    return command if command in ("START", "STOP") else None
+
+
 def create_mqtt_worker(db: TelemetryDatabase) -> mqtt.Client:
     import paho.mqtt.client as mqtt
 
@@ -738,16 +761,8 @@ def create_mqtt_worker(db: TelemetryDatabase) -> mqtt.Client:
         topic = msg.topic
         raw_payload = msg.payload.decode("utf-8", errors="replace").strip()
 
-        if topic == "climbbud/control/session":
-            command = raw_payload.upper()
-            # Support either raw "START"/"STOP" strings or JSON {"command": "START"}
-            if command.startswith("{"):
-                try:
-                    data = json.loads(raw_payload)
-                    command = str(data.get("command") or data.get("action") or "").upper()
-                except json.JSONDecodeError:
-                    pass
-
+        if topic == CONTROL_TOPIC:
+            command = parse_session_command(raw_payload)
             if command == "START":
                 db.start_session()
             elif command == "STOP":

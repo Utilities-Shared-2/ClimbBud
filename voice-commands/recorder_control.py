@@ -1,15 +1,19 @@
 """
 Voice control for ClimbBud recording sessions (runs on its own Pi with a mic).
 
-Listens (Vosk, offline) for "start recording" / "end recording" and tells the
-dashboard over HTTP:
-    POST <DASHBOARD_URL>/api/recording/start   (or /stop)
-The dashboard then starts/stops the video + pose recording and the health-stats
-(telemetry) session, exactly like its Record button.
+Listens (Vosk, offline) for "start recording" / "end recording" and sends two
+HTTP requests:
+    POST <DASHBOARD_URL>/api/recording/start          (or /stop)
+        dashboard starts/stops the video + pose recording and the health-stats
+        (telemetry) session, exactly like its Record button
+    POST <POSE_TRACKER_URL>/toggle?state=on           (or state=off)
+        the QNX pose tracker turns tracking (model + servos) on/off
 
 Settings come from environment variables, or from voice-commands/.env (copy
 .env.example). Real environment variables win over the file:
   DASHBOARD_URL        dashboard base URL (default http://127.0.0.1:5000)
+  POSE_TRACKER_URL     QNX pose tracker base URL, e.g. http://192.168.50.2:8080
+                       (empty = don't control tracking)
   RECORDING_API_TOKEN  optional; must match the dashboard's RECORDING_API_TOKEN
   VOICE_RECORD_AUDIO   1 = also save the mic audio to recordings/*.wav while a
                        session is active (default 0)
@@ -40,11 +44,13 @@ BLOCKSIZE = 4000
 GRAMMAR = json.dumps(["start recording", "end recording", "[unk]"])
 
 DASHBOARD_URL = os.getenv("DASHBOARD_URL", "http://127.0.0.1:5000").strip().rstrip("/")
+POSE_TRACKER_URL = os.getenv("POSE_TRACKER_URL", "").strip().rstrip("/")
 RECORDING_API_TOKEN = os.getenv("RECORDING_API_TOKEN", "").strip()
-HTTP_TIMEOUT_SEC = 3
+HTTP_TIMEOUT_SEC = 8  # dashboard start/stop also opens/closes the DB session and video files
 
 session_active = False
 last_response = None  # dashboard's JSON reply to the most recent command
+last_tracking = None  # QNX tracker's JSON reply ({"enabled": bool}) to the most recent toggle
 is_currently_recording = False
 audio_queue: queue.Queue[bytes] = queue.Queue()
 current_file = None
@@ -85,8 +91,37 @@ def send_session(command: str) -> bool:
     return True
 
 
+def send_tracking(on: bool) -> bool:
+    """POST <POSE_TRACKER_URL>/toggle?state=on|off to the QNX tracker. True if it answered 200."""
+    global last_tracking
+    if not POSE_TRACKER_URL:
+        return False  # tracking control not configured
+    import requests
+
+    url = f"{POSE_TRACKER_URL}/toggle"
+    state = "on" if on else "off"
+    try:
+        response = requests.post(url, params={"state": state}, timeout=HTTP_TIMEOUT_SEC)
+    except requests.RequestException as exc:  # never let a network error kill the listener
+        print(f"[HTTP] Could not reach pose tracker at {url}: {exc}")
+        return False
+    if response.status_code != 200:
+        print(f"[HTTP] Pose tracker refused state={state} ({response.status_code}): {response.text[:200]}")
+        return False
+    try:
+        last_tracking = response.json()
+    except ValueError:
+        last_tracking = None
+    enabled = last_tracking.get("enabled") if isinstance(last_tracking, dict) else "?"
+    print(f"[HTTP] tracking {state} -> enabled={enabled}")
+    return True
+
+
 def start_session() -> None:
     global session_active
+    # Tracker first, so pose data is flowing when the recording starts. state=on is
+    # safe to repeat, so it's sent every time and doesn't depend on the dashboard.
+    send_tracking(True)
     if session_active:
         return
     if send_session("START"):
@@ -98,6 +133,7 @@ def end_session() -> None:
     global session_active
     if session_active and send_session("STOP"):
         session_active = False
+    send_tracking(False)  # always: tracking goes off even if the dashboard was unreachable
     end_recording()
 
 
@@ -161,6 +197,7 @@ def main() -> None:
     rec = KaldiRecognizer(model, SAMPLE_RATE, GRAMMAR)
     rec.SetWords(False)
     print(f"Dashboard: {DASHBOARD_URL}")
+    print(f"Pose tracker: {POSE_TRACKER_URL or '(not configured: tracking is not controlled)'}")
 
     try:
         with sd.RawInputStream(

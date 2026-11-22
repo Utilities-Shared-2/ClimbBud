@@ -107,27 +107,11 @@ class FakeServers:
 
     def __init__(self, camera=True):
         self.pose_ts = 0.0
-        self.toggles = []  # states received on /toggle, like the QNX tracker's endpoint
         outer = self
 
         class Handler(BaseHTTPRequestHandler):
             def log_message(self, *a):
                 pass
-
-            def do_POST(self):
-                path, _, query = self.path.partition("?")
-                if path != "/toggle":
-                    self.send_response(404)
-                    self.end_headers()
-                    return
-                state = query.partition("state=")[2].split("&")[0]
-                outer.toggles.append(state)
-                body = json.dumps({"enabled": state != "off"}).encode()
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Content-Length", str(len(body)))
-                self.end_headers()
-                self.wfile.write(body)
 
             def do_GET(self):
                 if self.path == "/pose":

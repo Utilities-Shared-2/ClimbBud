@@ -33,9 +33,6 @@ telemetry/.env before starting the dashboard (environment takes precedence):
   RECORDING_API_TOKEN            Optional shared secret for POST /api/recording/start
                                  and /stop (used by the voice Pi). When set, callers
                                  must send it in the X-ClimbBud-Token header.
-  POSE_TRACKING_CONTROL          Starting/stopping a recording also turns the QNX pose
-                                 tracker on/off via POST <pose server>/toggle?state=on|off
-                                 (default 1). Set 0 to leave tracking alone.
   UI_TELEMETRY_WORKER            Run the telemetry DB worker inside the dashboard
                                  (default 1). Set 0 when telemetry/db.py runs as its
                                  own process on the same broker, or every START
@@ -179,7 +176,6 @@ RECORDINGS_DIR = Path(os.getenv("RECORDINGS_DIR", "").strip() or REPO_ROOT / "re
 MQTT_BROKER_IP = os.getenv("MQTT_BROKER_IP", "127.0.0.1")
 MQTT_BROKER_PORT = int(os.getenv("MQTT_BROKER_PORT", "1883"))
 UI_TELEMETRY_WORKER = os.getenv("UI_TELEMETRY_WORKER", "1").strip().lower() not in {"0", "false", "no", "off"}
-POSE_TRACKING_CONTROL = os.getenv("POSE_TRACKING_CONTROL", "1").strip().lower() not in {"0", "false", "no", "off"}
 
 # Record the raw camera feed when configured; otherwise the pose server's annotated
 # stream (lower frame rate, skeleton drawn in) so there is always video.
@@ -197,7 +193,6 @@ state = {
     "battery": 87,
     "stream_connected": False,
     "camera_connected": False,
-    "tracking": None,  # last pose-tracking on/off request to the QNX tracker and its outcome
 }
 
 # Initialize telemetry database on startup
@@ -290,7 +285,6 @@ def set_recording(on, drive_db=False):
             state["elapsed"] = 0.0
             state["recording"] = True
             state["start"] = now
-            set_tracking(True)  # pose model + servos on first, so pose data flows while recording
             if drive_db and telemetry_db:
                 telemetry_db.start_session()
             session_recorder.start()
@@ -303,43 +297,7 @@ def set_recording(on, drive_db=False):
             session_recorder.stop()
             if drive_db and telemetry_db:
                 telemetry_db.stop_session()
-            set_tracking(False)
         return True
-
-
-def _spawn(target, *args):
-    """Run target on a daemon thread (patched to run inline in tests)."""
-    threading.Thread(target=target, args=args, daemon=True).start()
-
-
-def set_tracking(on):
-    """Ask the QNX pose tracker to turn tracking (model + servo GPIO) on or off.
-
-    Runs in the background so a slow/offline QNX Pi never delays the button or the
-    voice Pi's reply; the outcome lands in state["tracking"]. While tracking is off
-    the tracker's annotated stream and /pose stop updating.
-    """
-    if not POSE_TRACKING_CONTROL:
-        return
-    state["tracking"] = {"requested": bool(on), "enabled": None, "error": None, "at": time.time()}
-    _spawn(_send_tracking, bool(on))
-
-
-def _send_tracking(on):
-    result = {"requested": on, "enabled": None, "error": None, "at": time.time()}
-    try:
-        response = requests.post(f"{POSE_STREAM_URL}/toggle",
-                                 params={"state": "on" if on else "off"}, timeout=2)
-        response.raise_for_status()
-        result["enabled"] = bool(response.json().get("enabled"))
-        print(f"[UI] Pose tracking {'on' if result['enabled'] else 'off'}")
-    except (requests.RequestException, ValueError, AttributeError) as exc:
-        result["error"] = str(exc)
-        app.logger.warning("Pose tracking toggle failed: %s", exc)
-    # Only record it if no newer request superseded this one meanwhile
-    current = state.get("tracking")
-    if current is None or current.get("requested") == on:
-        state["tracking"] = result
 
 
 def on_session_command(command):
@@ -511,7 +469,6 @@ def live():
             recording=state["recording"],
             elapsed=read_elapsed(),
             video_recording=session_recorder.status(),
-            tracking=state["tracking"],
         ), 503
 
     try:
@@ -526,7 +483,6 @@ def live():
             recording=state["recording"],
             elapsed=read_elapsed(),
             video_recording=session_recorder.status(),
-            tracking=state["tracking"],
         ), 503
 
     latest = data["latest"]
@@ -544,7 +500,6 @@ def live():
         stream_connected=state["stream_connected"],
         video_source=video_source(),
         video_recording=session_recorder.status(),
-        tracking=state["tracking"],
     )
 
 
@@ -632,8 +587,7 @@ def _apply_recording(on):
         # subscription receives the echo, which is a no-op because set_recording is idempotent.
         publish_session_command("START" if on else "STOP")
     return jsonify(recording=state["recording"], changed=changed, elapsed=read_elapsed(),
-                   video_recording=session_recorder.status(),
-                   tracking=state["tracking"])
+                   video_recording=session_recorder.status())
 
 
 def _recording_api_authorized():

@@ -339,7 +339,10 @@ class SessionRecorder:
             while not self._stop.is_set():
                 resp = None
                 try:
-                    resp = self.http.get(self.camera_url, stream=True, timeout=(3, 5))
+                    # Short timeouts: stop() waits for this thread, so an unreachable or
+                    # stalled camera must not hold up "end recording". 2 s read is still
+                    # well above the frame gap of even the ~2 fps annotated QNX stream.
+                    resp = self.http.get(self.camera_url, stream=True, timeout=(1, 2))
                     self._resp = resp
                     resp.raise_for_status()
                     if warned:

@@ -321,9 +321,56 @@ class SessionControlTests(unittest.TestCase):
         patcher = patch("ui.app.session_recorder", self.recorder)
         patcher.start()
         self.addCleanup(patcher.stop)
-        self.state = patch.dict(state, {"recording": False, "elapsed": 0.0, "start": time.time()})
+        self.state = patch.dict(state, {"recording": False, "elapsed": 0.0, "start": time.time(),
+                                        "tracking": None})
         self.state.start()
         self.addCleanup(self.state.stop)
+        # no real background calls to the QNX tracker unless a test opts in
+        spawn = patch("ui.app._spawn")
+        self.spawn = spawn.start()
+        self.addCleanup(spawn.stop)
+
+    def run_tracking_inline(self, post):
+        """Make set_tracking run synchronously against a mocked requests.post."""
+        self.spawn.side_effect = lambda target, *args: target(*args)
+        patcher = patch("ui.app.requests.post", post)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_recording_start_stop_toggles_pose_tracking(self):
+        from ui.app import POSE_STREAM_URL
+        post = Mock(side_effect=lambda url, params, timeout: Mock(
+            raise_for_status=Mock(), json=Mock(return_value={"enabled": params["state"] == "on"})))
+        self.run_tracking_inline(post)
+        with patch("ui.app.telemetry_db", None), patch("ui.app.control_client", None), \
+                patch("ui.app.threading.Thread"), patch.dict("os.environ", {"RECORDING_API_TOKEN": ""}):
+            started = self.client.post("/api/recording/start").get_json()
+            self.client.post("/api/recording/start")  # repeated: no second toggle
+            self.assertEqual(started["tracking"]["enabled"], True)
+            stopped = self.client.post("/api/recording/stop").get_json()
+        self.assertEqual(stopped["tracking"]["enabled"], False)
+        self.assertEqual([c.args[0] for c in post.call_args_list], [f"{POSE_STREAM_URL}/toggle"] * 2)
+        self.assertEqual([c.kwargs["params"]["state"] for c in post.call_args_list], ["on", "off"])
+
+    def test_tracker_offline_does_not_block_recording(self):
+        self.run_tracking_inline(Mock(side_effect=requests.ConnectionError("qnx down")))
+        with patch("ui.app.telemetry_db", None), patch("ui.app.control_client", None), \
+                patch("ui.app.threading.Thread"), self.assertLogs(app.logger, level="WARNING"):
+            data = self.client.post("/api/recording/toggle").get_json()
+        self.assertTrue(data["recording"])
+        self.recorder.start.assert_called_once()
+        self.assertIsNone(state["tracking"]["enabled"])
+        self.assertIn("qnx down", state["tracking"]["error"])
+
+    def test_tracking_control_can_be_disabled(self):
+        post = Mock()
+        self.run_tracking_inline(post)
+        with patch("ui.app.POSE_TRACKING_CONTROL", False), patch("ui.app.telemetry_db", None), \
+                patch("ui.app.control_client", None), patch("ui.app.threading.Thread"):
+            self.client.post("/api/recording/toggle")
+            self.client.post("/api/recording/toggle")
+        post.assert_not_called()
+        self.assertIsNone(state["tracking"])
 
     def test_start_and_stop_drive_state_and_recorder(self):
         from ui.app import on_session_command

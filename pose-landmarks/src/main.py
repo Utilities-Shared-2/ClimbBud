@@ -87,7 +87,7 @@ class PIDController:
         output = (self.kp * normalized_error) + (self.ki * self._integral) + (self.kd * self._derivative)
         print(f"output:{output}")
         output = output*self.output_limits
-        if output > 0.099:
+        if abs(output) > 0.099:
             #clamps the movement limit to roughly > 0.1
             self._prev_error = normalized_error
         else:

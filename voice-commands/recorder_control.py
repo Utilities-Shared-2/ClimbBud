@@ -77,16 +77,16 @@ def publish_session(command: str) -> bool:
     if mqtt_client is None:
         print(f"[MQTT] Not connected; could not send {command}")
         return False
-    payload = json.dumps({"command": command, "source": "voice", "ts": time.time()})
-    try:
-        info = mqtt_client.publish(CONTROL_TOPIC, payload, qos=1)
-    except Exception as exc:  # never let a network error kill the listener
-        print(f"[MQTT] Failed to send {command}: {exc}")
-        return False
-    if info.rc != 0:
-        print(f"[MQTT] Failed to send {command} (rc={info.rc})")
-        return False
-    print(f"[MQTT] Sent {command} -> {CONTROL_TOPIC}")
+    # payload = json.dumps({"command": command, "source": "voice", "ts": time.time()})
+    # try:
+    #     info = mqtt_client.publish(CONTROL_TOPIC, payload, qos=1)
+    # except Exception as exc:  # never let a network error kill the listener
+    #     print(f"[MQTT] Failed to send {command}: {exc}")
+    #     return False
+    # if info.rc != 0:
+    #     print(f"[MQTT] Failed to send {command} (rc={info.rc})")
+    #     return False
+    # print(f"[MQTT] Sent {command} -> {CONTROL_TOPIC}")
     return True
 
 

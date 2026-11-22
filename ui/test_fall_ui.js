@@ -66,6 +66,7 @@ function createDashboard() {
     liveStatus: 200,
     dismissStatus: 200,
     delayedLive: null,
+    recording: false,
   };
   const response = (status, data) => ({
     ok: status >= 200 && status < 300,
@@ -95,9 +96,13 @@ function createDashboard() {
         return delayed;
       }
       return response(server.liveStatus, {
-        fall: server.fall, error: "Telemetry offline", recording: false,
+        fall: server.fall, error: "Telemetry offline", recording: server.recording,
         elapsed: 0, pr: 1, battery: 80,
       });
+    }
+    if (url === "/api/recording/toggle") {
+      server.recording = !server.recording;
+      return response(200, { recording: server.recording, elapsed: 0 });
     }
     throw new Error(`Unexpected request: ${url}`);
   }
@@ -195,4 +200,17 @@ test("video reconnects after disconnection", async () => {
   assert.equal(element("disconnectedMessage").hidden, false);
   vm.runInContext("updateVideoState(true)", context);
   assert.equal(video.attributes.src, "/video/stream");
+});
+
+test("record button shows recording even while telemetry is offline", async () => {
+  const { element, server } = createDashboard();
+  await settle();
+  server.liveStatus = 503;  // telemetry down
+  await element("recBtn").listeners.click();
+  await settle();
+  assert.equal(server.recording, true);
+  assert.equal(element("recText").textContent, "Recording…");
+  await element("recBtn").listeners.click();
+  await settle();
+  assert.equal(element("recText").textContent, "Stopped");
 });

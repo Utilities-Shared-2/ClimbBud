@@ -1,17 +1,20 @@
 """
 Voice control for ClimbBud recording sessions (runs on its own Pi with a mic).
 
-Listens (Vosk, offline) for "start recording" / "end recording" and publishes
-START / STOP to the MQTT topic climbbud/control/session. The telemetry worker
-starts/stops the health-stats session and the dashboard starts/stops the
-video + pose recording from that same message.
+Listens (Vosk, offline) for "start recording" / "end recording" and tells the
+dashboard over HTTP:
+    POST <DASHBOARD_URL>/api/recording/start   (or /stop)
+The dashboard then starts/stops the video + pose recording and the health-stats
+(telemetry) session, exactly like its Record button.
 
 Settings come from environment variables, or from voice-commands/.env (copy
 .env.example). Real environment variables win over the file:
-  MQTT_BROKER_IP      broker the telemetry service uses (default 127.0.0.1)
-  MQTT_BROKER_PORT    default 1883
-  VOICE_RECORD_AUDIO  1 = also save the mic audio to recordings/*.wav while a
-                      session is active (default 0)
+  DASHBOARD_URL        dashboard base URL (default http://127.0.0.1:5000)
+  RECORDING_API_TOKEN  optional; must match the dashboard's RECORDING_API_TOKEN
+  VOICE_RECORD_AUDIO   1 = also save the mic audio to recordings/*.wav while a
+                       session is active (default 0)
+
+Test the network call without a mic: python simulate_command.py start
 """
 import json
 import os
@@ -36,12 +39,12 @@ SAMPLE_RATE = 16000
 BLOCKSIZE = 4000
 GRAMMAR = json.dumps(["start recording", "end recording", "[unk]"])
 
-CONTROL_TOPIC = "climbbud/control/session"
-MQTT_BROKER_IP = os.getenv("MQTT_BROKER_IP", "127.0.0.1")
-MQTT_BROKER_PORT = int(os.getenv("MQTT_BROKER_PORT", "1883"))
+DASHBOARD_URL = os.getenv("DASHBOARD_URL", "http://127.0.0.1:5000").strip().rstrip("/")
+RECORDING_API_TOKEN = os.getenv("RECORDING_API_TOKEN", "").strip()
+HTTP_TIMEOUT_SEC = 3
 
 session_active = False
-mqtt_client = None
+last_response = None  # dashboard's JSON reply to the most recent command
 is_currently_recording = False
 audio_queue: queue.Queue[bytes] = queue.Queue()
 current_file = None
@@ -56,37 +59,29 @@ def setIsVoiceRecorded(isRecorded) -> None:
     IsVoiceRecorded = isRecorded
 
 
-# ---- session control over MQTT ----
+# ---- session control over HTTP ----
 
-def connect_mqtt():
-    """Connect to the broker in the background; paho keeps reconnecting on its own."""
-    import paho.mqtt.client as mqtt
+def send_session(command: str) -> bool:
+    """POST START/STOP to the dashboard. True if it answered 200 (recording state applied)."""
+    global last_response
+    import requests
 
-    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=f"climbbud-voice-{os.getpid()}")
-    client.on_connect = lambda c, u, f, rc, p=None: print(
-        f"[MQTT] Connected to {MQTT_BROKER_IP}:{MQTT_BROKER_PORT} (rc={rc})")
-    client.on_disconnect = lambda c, u, f, rc, p=None: print(f"[MQTT] Disconnected (rc={rc}), retrying...")
-    client.reconnect_delay_set(min_delay=1, max_delay=10)
-    client.connect_async(MQTT_BROKER_IP, MQTT_BROKER_PORT, keepalive=30)
-    client.loop_start()
-    return client
-
-
-def publish_session(command: str) -> bool:
-    """Publish START/STOP to the control topic. Returns True if handed to the client."""
-    if mqtt_client is None:
-        print(f"[MQTT] Not connected; could not send {command}")
+    url = f"{DASHBOARD_URL}/api/recording/{'start' if command == 'START' else 'stop'}"
+    headers = {"X-ClimbBud-Token": RECORDING_API_TOKEN} if RECORDING_API_TOKEN else {}
+    try:
+        response = requests.post(url, headers=headers, timeout=HTTP_TIMEOUT_SEC)
+    except requests.RequestException as exc:  # never let a network error kill the listener
+        print(f"[HTTP] Could not reach dashboard at {url}: {exc}")
         return False
-    # payload = json.dumps({"command": command, "source": "voice", "ts": time.time()})
-    # try:
-    #     info = mqtt_client.publish(CONTROL_TOPIC, payload, qos=1)
-    # except Exception as exc:  # never let a network error kill the listener
-    #     print(f"[MQTT] Failed to send {command}: {exc}")
-    #     return False
-    # if info.rc != 0:
-    #     print(f"[MQTT] Failed to send {command} (rc={info.rc})")
-    #     return False
-    # print(f"[MQTT] Sent {command} -> {CONTROL_TOPIC}")
+    if response.status_code != 200:
+        print(f"[HTTP] Dashboard refused {command} ({response.status_code}): {response.text[:200]}")
+        return False
+    try:
+        last_response = response.json()
+    except ValueError:
+        last_response = None
+    recording = last_response.get("recording") if isinstance(last_response, dict) else "?"
+    print(f"[HTTP] {command} -> recording={recording}")
     return True
 
 
@@ -94,14 +89,14 @@ def start_session() -> None:
     global session_active
     if session_active:
         return
-    if publish_session("START"):
+    if send_session("START"):
         session_active = True
     start_recording()
 
 
 def end_session() -> None:
     global session_active
-    if session_active and publish_session("STOP"):
+    if session_active and send_session("STOP"):
         session_active = False
     end_recording()
 
@@ -159,14 +154,13 @@ def audio_callback(indata, frames, time_info, status) -> None:
 
 
 def main() -> None:
-    global mqtt_client
     import sounddevice as sd
     from vosk import KaldiRecognizer, Model
 
     model = Model(str(MODEL_PATH))
     rec = KaldiRecognizer(model, SAMPLE_RATE, GRAMMAR)
     rec.SetWords(False)
-    mqtt_client = connect_mqtt()
+    print(f"Dashboard: {DASHBOARD_URL}")
 
     try:
         with sd.RawInputStream(
@@ -185,11 +179,7 @@ def main() -> None:
     except KeyboardInterrupt:
         print("\nShutting down...")
     finally:
-        end_session()
-        if mqtt_client is not None:
-            time.sleep(0.5)  # let a final STOP go out
-            mqtt_client.loop_stop()
-            mqtt_client.disconnect()
+        end_session()  # don't leave the dashboard recording when the listener exits
 
 
 if __name__ == "__main__":

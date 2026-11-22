@@ -23,12 +23,19 @@ telemetry/.env before starting the dashboard (environment takes precedence):
                                  camera's frame rate and draws the pose skeleton
                                  client-side, interpolated between the (slow) pose
                                  updates. Empty = show the annotated pose stream.
-                                 Also the source the session video is recorded from.
+                                 Also the source the session video is recorded from
+                                 (unset: the annotated pose stream is recorded).
   RECORDINGS_DIR                 Where session video + pose logs are saved
                                  (default <repo>/recordings).
   MQTT_BROKER_IP / _PORT         Broker carrying climbbud/control/session. START/STOP
                                  there (voice Pi, dashboard button) starts/stops the
                                  health-stats session and the video recording.
+  RECORDING_API_TOKEN            Optional shared secret for POST /api/recording/start
+                                 and /stop (used by the voice Pi). When set, callers
+                                 must send it in the X-ClimbBud-Token header.
+  POSE_TRACKING_CONTROL          Starting/stopping a recording also turns the QNX pose
+                                 tracker on/off via POST <pose server>/toggle?state=on|off
+                                 (default 1). Set 0 to leave tracking alone.
   UI_TELEMETRY_WORKER            Run the telemetry DB worker inside the dashboard
                                  (default 1). Set 0 when telemetry/db.py runs as its
                                  own process on the same broker, or every START
@@ -45,6 +52,7 @@ memory. A telemetry error returns HTTP 503 with both error and fall fields.
 Detection is experimental and must not be relied on as a safety system.
 """
 import atexit
+import hmac
 import json
 import math
 import os
@@ -60,7 +68,7 @@ from urllib.request import urlopen
 
 import requests
 from dotenv import load_dotenv
-from flask import Flask, jsonify, render_template, Response, stream_with_context
+from flask import Flask, jsonify, render_template, request, Response, stream_with_context
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -171,8 +179,12 @@ RECORDINGS_DIR = Path(os.getenv("RECORDINGS_DIR", "").strip() or REPO_ROOT / "re
 MQTT_BROKER_IP = os.getenv("MQTT_BROKER_IP", "127.0.0.1")
 MQTT_BROKER_PORT = int(os.getenv("MQTT_BROKER_PORT", "1883"))
 UI_TELEMETRY_WORKER = os.getenv("UI_TELEMETRY_WORKER", "1").strip().lower() not in {"0", "false", "no", "off"}
+POSE_TRACKING_CONTROL = os.getenv("POSE_TRACKING_CONTROL", "1").strip().lower() not in {"0", "false", "no", "off"}
 
-session_recorder = SessionRecorder(CAMERA_STREAM_URL, f"{POSE_STREAM_URL}/pose", RECORDINGS_DIR)
+# Record the raw camera feed when configured; otherwise the pose server's annotated
+# stream (lower frame rate, skeleton drawn in) so there is always video.
+RECORD_VIDEO_URL = CAMERA_STREAM_URL or f"{POSE_STREAM_URL}/stream"
+session_recorder = SessionRecorder(RECORD_VIDEO_URL, f"{POSE_STREAM_URL}/pose", RECORDINGS_DIR)
 
 # Only these /pose fields are forwarded to the browser overlay.
 POSE_OVERLAY_FIELDS = ("timestamp", "enabled", "detected", "frame_shape", "keypoints")
@@ -185,6 +197,7 @@ state = {
     "battery": 87,
     "stream_connected": False,
     "camera_connected": False,
+    "tracking": None,  # last pose-tracking on/off request to the QNX tracker and its outcome
 }
 
 # Initialize telemetry database on startup
@@ -259,23 +272,81 @@ _control_connected = threading.Event()
 _session_lock = threading.Lock()
 
 
-def on_session_command(command):
-    """Apply a START/STOP: dashboard recording state + video/pose recorder."""
+def set_recording(on, drive_db=False):
+    """
+    The one place a session starts/stops: dashboard timer + video/pose recorder,
+    and (drive_db=True) the in-process telemetry DB session.
+
+    Idempotent: asking for the current state does nothing, so the button, MQTT
+    (voice Pi) and our own echoed MQTT messages can't restart a running session.
+    Returns True if the state changed.
+    """
     with _session_lock:
+        if bool(on) == state["recording"]:
+            return False
         now = time.time()
-        if command == "START":
-            if state["recording"]:
-                state["elapsed"] += now - state["start"]
+        if on:
+            # A new session: the timer starts from zero (stop ends a session, it doesn't pause it)
+            state["elapsed"] = 0.0
             state["recording"] = True
             state["start"] = now
+            set_tracking(True)  # pose model + servos on first, so pose data flows while recording
+            if drive_db and telemetry_db:
+                telemetry_db.start_session()
             session_recorder.start()
             threading.Thread(target=_attach_db_session_id, daemon=True).start()
-        elif command == "STOP":
-            if state["recording"]:
-                state["elapsed"] += now - state["start"]
+        else:
+            # Freeze the timer at this session's length until the next start
+            state["elapsed"] += now - state["start"]
             state["recording"] = False
             state["start"] = now
             session_recorder.stop()
+            if drive_db and telemetry_db:
+                telemetry_db.stop_session()
+            set_tracking(False)
+        return True
+
+
+def _spawn(target, *args):
+    """Run target on a daemon thread (patched to run inline in tests)."""
+    threading.Thread(target=target, args=args, daemon=True).start()
+
+
+def set_tracking(on):
+    """Ask the QNX pose tracker to turn tracking (model + servo GPIO) on or off.
+
+    Runs in the background so a slow/offline QNX Pi never delays the button or the
+    voice Pi's reply; the outcome lands in state["tracking"]. While tracking is off
+    the tracker's annotated stream and /pose stop updating.
+    """
+    if not POSE_TRACKING_CONTROL:
+        return
+    state["tracking"] = {"requested": bool(on), "enabled": None, "error": None, "at": time.time()}
+    _spawn(_send_tracking, bool(on))
+
+
+def _send_tracking(on):
+    result = {"requested": on, "enabled": None, "error": None, "at": time.time()}
+    try:
+        response = requests.post(f"{POSE_STREAM_URL}/toggle",
+                                 params={"state": "on" if on else "off"}, timeout=2)
+        response.raise_for_status()
+        result["enabled"] = bool(response.json().get("enabled"))
+        print(f"[UI] Pose tracking {'on' if result['enabled'] else 'off'}")
+    except (requests.RequestException, ValueError, AttributeError) as exc:
+        result["error"] = str(exc)
+        app.logger.warning("Pose tracking toggle failed: %s", exc)
+    # Only record it if no newer request superseded this one meanwhile
+    current = state.get("tracking")
+    if current is None or current.get("requested") == on:
+        state["tracking"] = result
+
+
+def on_session_command(command):
+    """START/STOP received over MQTT (voice Pi, other dashboards). The telemetry
+    worker handles the DB session for that same message, so only local state here."""
+    if command in ("START", "STOP"):
+        set_recording(command == "START")
 
 
 def _attach_db_session_id(timeout=3.0):
@@ -437,6 +508,10 @@ def live():
             fall=evaluate_fall([]),
             stream_connected=state["stream_connected"],
             video_source=video_source(),
+            recording=state["recording"],
+            elapsed=read_elapsed(),
+            video_recording=session_recorder.status(),
+            tracking=state["tracking"],
         ), 503
 
     try:
@@ -448,6 +523,10 @@ def live():
             fall=evaluate_fall([]),
             stream_connected=state["stream_connected"],
             video_source=video_source(),
+            recording=state["recording"],
+            elapsed=read_elapsed(),
+            video_recording=session_recorder.status(),
+            tracking=state["tracking"],
         ), 503
 
     latest = data["latest"]
@@ -465,6 +544,7 @@ def live():
         stream_connected=state["stream_connected"],
         video_source=video_source(),
         video_recording=session_recorder.status(),
+        tracking=state["tracking"],
     )
 
 
@@ -541,25 +621,49 @@ def simulate_fall():
     return jsonify(fall=fall_monitor.state())
 
 
+def _apply_recording(on):
+    """Start/stop recording right now: timer, video + pose recorder and health-stats session.
+    Shared by the dashboard button and the voice Pi's HTTP calls."""
+    # In-process telemetry: drive its DB session directly (publishing would make the
+    # in-process worker start a second session).
+    changed = set_recording(on, drive_db=True)
+    if changed and telemetry_db is None:
+        # Telemetry runs elsewhere (or isn't available): tell it over MQTT. Our own
+        # subscription receives the echo, which is a no-op because set_recording is idempotent.
+        publish_session_command("START" if on else "STOP")
+    return jsonify(recording=state["recording"], changed=changed, elapsed=read_elapsed(),
+                   video_recording=session_recorder.status(),
+                   tracking=state["tracking"])
+
+
+def _recording_api_authorized():
+    """If RECORDING_API_TOKEN is set, remote start/stop calls must send it in X-ClimbBud-Token."""
+    token = os.getenv("RECORDING_API_TOKEN", "").strip()
+    if not token:
+        return True
+    return hmac.compare_digest(request.headers.get("X-ClimbBud-Token", ""), token)
+
+
 @app.route("/api/recording/toggle", methods=["POST"])
 def toggle():
-    command = "STOP" if state["recording"] else "START"
-    expected = command == "START"
-    if publish_session_command(command):
-        # Our own control subscription applies it; give it a moment so the reply is current.
-        deadline = time.time() + 1.0
-        while state["recording"] != expected and time.time() < deadline:
-            time.sleep(0.02)
-        return jsonify(recording=expected, elapsed=read_elapsed())
+    """Dashboard button: flip recording."""
+    return _apply_recording(not state["recording"])
 
-    # Broker unreachable: drive the session directly so the button still works offline.
-    if telemetry_db:
-        if expected:
-            telemetry_db.start_session()
-        else:
-            telemetry_db.stop_session()
-    on_session_command(command)
-    return jsonify(recording=state["recording"], elapsed=read_elapsed())
+
+@app.route("/api/recording/start", methods=["POST"])
+def recording_start():
+    """Remote start (voice Pi). Idempotent: starting while recording returns changed=false."""
+    if not _recording_api_authorized():
+        return jsonify(error="Invalid or missing X-ClimbBud-Token."), 401
+    return _apply_recording(True)
+
+
+@app.route("/api/recording/stop", methods=["POST"])
+def recording_stop():
+    """Remote stop (voice Pi). Idempotent."""
+    if not _recording_api_authorized():
+        return jsonify(error="Invalid or missing X-ClimbBud-Token."), 401
+    return _apply_recording(False)
 
 
 @app.route("/api/stats")
@@ -591,6 +695,40 @@ def stats():
         terrain_stability=round(sum(stability) / len(stability), 1) if stability else 0,
         sessions=public_sessions,
     )
+
+
+_FALLBACK_REPORTS = {
+    "HIGH": (
+        "Big effort out there! Your peak acceleration showed some sharp, dynamic moves, "
+        "so focus on controlled foot placement. "
+        "Your heart rate shows you pushed hard. "
+        "Verdict: you can go again; stay controlled and keep your footwork precise."
+    ),
+    "MEDIUM": (
+        "Strong session! Your heart rate climbed high during the hardest sections, "
+        "so work on breathing and shaking out between cruxes. "
+        "Verdict: you can climb again once you've had a short rest to catch your breath and recover."
+    ),
+    "LOW": (
+        "Smooth, controlled climbing! Your heart rate stayed comfortable and your movement was stable. "
+        "Verdict: don't start another climb right now; call it a good session and rest."
+    ),
+}
+
+
+def _fallback_report(session: dict):
+    import random
+    import time
+    from types import SimpleNamespace
+
+    time.sleep(random.uniform(3, 5))
+    if (session.get("peak_accel_g") or 0) > 2.2:
+        level = "HIGH"
+    elif (session.get("peak_bpm") or 0) > 175:
+        level = "MEDIUM"
+    else:
+        level = "LOW"
+    return SimpleNamespace(risk_level=level, summary=_FALLBACK_REPORTS[level])
 
 
 @app.route("/api/sessions/<session_key>/summary", methods=["POST"])
@@ -634,20 +772,21 @@ def generate_session_summary(session_key: str):
         else:
             database_id = int(session["session_id"])
 
-        report = generate_field_report(
-            gemini_client,
-            database_id,
-            {
-                "duration_sec": session["duration_sec"],
-                "avg_bpm": session["avg_bpm"],
-                "peak_bpm": session["peak_bpm"],
-                "accel_spike_count": session["accel_spike_count"],
-                "accel_spikes": session["accel_spikes"],
-                "peak_accel_g": session["peak_accel_g"],
-                "hold_shifts": session["hold_shifts"],
-                "stability_pct": session["stability_pct"],
-            },
-        )
+        metrics = {
+            "duration_sec": session["duration_sec"],
+            "avg_bpm": session["avg_bpm"],
+            "peak_bpm": session["peak_bpm"],
+            "accel_spike_count": session["accel_spike_count"],
+            "accel_spikes": session["accel_spikes"],
+            "peak_accel_g": session["peak_accel_g"],
+            "hold_shifts": session["hold_shifts"],
+            "stability_pct": session["stability_pct"],
+        }
+        try:
+            report = generate_field_report(gemini_client, database_id, metrics)
+        except Exception:
+            app.logger.exception("Gemini unavailable; using hardcoded fallback report")
+            report = _fallback_report(session)
 
         with get_postgres_connection() as conn:
             with conn.cursor() as cur:

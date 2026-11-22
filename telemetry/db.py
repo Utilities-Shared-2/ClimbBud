@@ -772,10 +772,34 @@ def create_mqtt_worker(db: TelemetryDatabase) -> mqtt.Client:
     return client
 
 
+def _start_uart_bridge(db: TelemetryDatabase) -> threading.Thread | None:
+    """Start the UART watch bridge when UART input is configured.
+
+    Enabled by setting UART_PORT (or UART_INPUT=1 to auto-detect the port).
+    The bridge is imported lazily so MQTT-only runs don't need pyserial.
+    """
+    uart_port = os.getenv("UART_PORT")
+    uart_input = os.getenv("UART_INPUT", "").lower() in ("1", "true", "yes")
+    if not uart_input and not uart_port:
+        return None
+
+    from telemetry.watch_bridge_uart import resolve_uart_port, uart_reader
+
+    port = resolve_uart_port()
+    baud = int(os.getenv("UART_BAUD", "115200"))
+    reader = threading.Thread(
+        target=uart_reader, args=(port, baud, db), daemon=True
+    )
+    reader.start()
+    print(f"[DB] UART bridge listening on {port} @ {baud} baud.")
+    return reader
+
+
 def main() -> None:
     db = TelemetryDatabase(pg_url=TIGER_DATA_URL, sqlite_path=SQLITE_DB_PATH)
     mqtt_client = create_mqtt_worker(db)
     mqtt_client.loop_start()
+    _start_uart_bridge(db)
 
     try:
         while True:
